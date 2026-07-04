@@ -1,0 +1,42 @@
+[package]
+name = "rss_digest"
+version = "0.1.0"
+edition = "2021"
+description = "Daily RSS digest with RAG-powered summarization using FreshRSS, Qdrant, and Ollama"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# RSS parsing
+rss = "2.1"
+
+# Vector database (Qdrant)
+qdrant-client = "1.0"
+
+# LLM (Ollama)
+ollama-rs = "0.3"
+
+# Email sending
+lettre = { version = "0.11", features = ["tokio1-native-tls", "smtp-transport"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
+dotenvy = "0.15"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
