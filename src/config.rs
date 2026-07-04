@@ -1,5 +1,4 @@
 use serde::Deserialize;
-use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
@@ -42,6 +41,7 @@ pub struct SmtpConfig {
     pub username: String,
     pub password: String,
     pub from: String,
+    pub tls_mode: String, // "none" | "starttls" | "tls" (default "starttls")
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -49,6 +49,7 @@ pub struct UserConfig {
     pub name: String,
     pub freshrss_user: String,
     pub email: String,
+    #[allow(dead_code)]
     pub shared_feeds: Option<Vec<String>>, // feed IDs to share with other users
 }
 
@@ -61,7 +62,7 @@ pub struct CronConfig {
 impl AppConfig {
     pub fn load_from_env() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok(); // load .env if exists
-        
+
         Ok(AppConfig {
             freshrss: FreshRSSConfig {
                 url: std::env::var("FRESHRSS_URL")?,
@@ -72,7 +73,8 @@ impl AppConfig {
                 url: std::env::var("QDRANT_URL")?,
                 api_key: std::env::var("QDRANT_API_KEY").ok(),
                 collection: std::env::var("QDRANT_COLLECTION").unwrap_or("articles".to_string()),
-                embedding_model: std::env::var("EMBEDDING_MODEL").unwrap_or("nomic-embed-text".to_string()),
+                embedding_model: std::env::var("EMBEDDING_MODEL")
+                    .unwrap_or("nomic-embed-text".to_string()),
                 context_window_days: std::env::var("CONTEXT_WINDOW_DAYS")
                     .ok()
                     .and_then(|s| s.parse().ok())
@@ -98,18 +100,17 @@ impl AppConfig {
                 username: std::env::var("SMTP_USERNAME")?,
                 password: std::env::var("SMTP_PASSWORD")?,
                 from: std::env::var("SMTP_FROM")?,
+                tls_mode: std::env::var("SMTP_TLS_MODE").unwrap_or("starttls".to_string()),
             },
             users: std::env::var("USERS")
                 .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or(vec![
-                    UserConfig {
-                        name: "Default".to_string(),
-                        freshrss_user: "admin".to_string(),
-                        email: std::env::var("DEFAULT_EMAIL")?,
-                        shared_feeds: None,
-                    },
-                ]),
+                .unwrap_or(vec![UserConfig {
+                    name: "Default".to_string(),
+                    freshrss_user: "admin".to_string(),
+                    email: std::env::var("DEFAULT_EMAIL")?,
+                    shared_feeds: None,
+                }]),
             cron: CronConfig {
                 time: std::env::var("CRON_TIME").unwrap_or("06:00".to_string()),
                 timezone: std::env::var("CRON_TIMEZONE").unwrap_or("UTC".to_string()),

@@ -1,7 +1,6 @@
-use anyhow;
+use crate::config::OllamaConfig;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use crate::config::OllamaConfig;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChatRequest {
@@ -54,14 +53,12 @@ impl OllamaClient {
         };
 
         let url = format!("{}/api/chat", self.config.url);
-        let response = self.client.post(&url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&request).send().await?;
 
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
             let body = response.text().await?;
-            return Err(anyhow::anyhow!("Ollama error: {} - {}", response.status(), body));
+            return Err(anyhow::anyhow!("Ollama error: {} - {}", status, body));
         }
 
         let result: ChatResponse = response.json().await?;
@@ -76,7 +73,9 @@ impl OllamaClient {
         date: &str,
     ) -> anyhow::Result<String> {
         // Build articles list as markdown
-        let articles_text = articles.iter().enumerate()
+        let articles_text = articles
+            .iter()
+            .enumerate()
             .map(|(i, article)| {
                 let content_preview = article.content.trim().chars().take(500).collect::<String>();
                 format!(
@@ -93,7 +92,9 @@ impl OllamaClient {
             .collect::<Vec<_>>()
             .join("\n\n");
 
-        let prompt = self.config.summarizer_prompt
+        let prompt = self
+            .config
+            .summarizer_prompt
             .replace("{rag_context}", rag_context)
             .replace("{articles}", &articles_text)
             .replace("{date}", date);

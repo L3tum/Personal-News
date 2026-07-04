@@ -3,25 +3,27 @@ name = "rss_digest"
 version = "0.1.0"
 edition = "2021"
 description = "Daily RSS digest with RAG-powered summarization using FreshRSS, Qdrant, and Ollama"
+license = "MIT"
 
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# HTTP client
-reqwest = { version = "0.12", features = ["json", "stream"] }
+# HTTP client (no native TLS)
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
 
 # RSS parsing
 rss = "2.1"
 
-# Vector database (Qdrant)
-qdrant-client = "1.0"
+# Vector database (Qdrant) — disable default features, reqwest uses rustls via our direct dep
+qdrant-client = { version = "1.18.0", default-features = false, features = ["reqwest", "serde"] }
 
-# LLM (Ollama)
-ollama-rs = "0.3"
+# LLM (Ollama) — disable default features to avoid native-tls
+ollama-rs = { version = "0.3", default-features = false, features = ["rustls"] }
 
 # Email sending
-lettre = { version = "0.11", features = ["tokio1-native-tls", "smtp-transport"] }
+lettre = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls", "smtp-transport", "webpki-roots", "ring", "builder"] }
+pulldown-cmark = "0.10"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -30,6 +32,7 @@ serde_yaml = "0.9"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.8"
 log = "0.4"
 env_logger = "0.11"
 anyhow = "1"

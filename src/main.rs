@@ -1,23 +1,29 @@
 mod config;
-mod freshrss;
-mod qdrant;
-mod ollama;
-mod email;
 mod digest;
+mod email;
+mod freshrss;
+mod ollama;
+mod qdrant;
 
+use chrono::TimeZone;
+use chrono_tz::Tz;
 use clap::Parser;
 use config::AppConfig;
-use freshrss::FreshRSSClient;
-use qdrant::QdrantClientWrapper;
-use ollama::OllamaClient;
-use email::EmailClient;
 use digest::generate_and_send_digest;
+use email::EmailClient;
+use freshrss::FreshRSSClient;
+use ollama::OllamaClient;
+use qdrant::QdrantClientWrapper;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time;
 
 #[derive(Parser, Debug)]
-#[command(name = "rss_digest", about = "Daily RSS digest with RAG-powered summarization")]
+#[command(
+    name = "rss_digest",
+    about = "Daily RSS digest with RAG-powered summarization"
+)]
 struct Cli {
     /// Run a single digest now (override cron schedule)
     #[arg(short, long)]
@@ -53,49 +59,82 @@ async fn main() -> anyhow::Result<()> {
             qdrant_client.clone(),
             ollama_client.clone(),
             email_client.clone(),
-        ).await?;
+        )
+        .await?;
         return Ok(());
     }
 
     // Otherwise, run on the cron schedule
-    log::info!("Starting digest scheduler: {}", config.cron.time);
-    
+    let tz = Tz::from_str(&config.cron.timezone).unwrap_or_else(|e| {
+        log::warn!(
+            "Invalid timezone '{}', falling back to UTC: {}",
+            config.cron.timezone,
+            e
+        );
+        chrono_tz::UTC
+    });
+
+    log::info!(
+        "Starting digest scheduler: {} ({})",
+        config.cron.time,
+        config.cron.timezone
+    );
+
     loop {
         let now = chrono::Utc::now();
-        let hour = now.hour();
-        let minute = now.minute();
+        let now_in_tz = now.with_timezone(&tz);
         let schedule = &config.cron.time;
         let (sched_hour, sched_minute) = parse_cron_time(schedule)?;
 
-        let next_run = if hour > sched_hour {
-            // Next day
-            chrono::Utc::now().date_naive().next_day().unwrap_or_else(|| now.date_naive())
-                .and_hms_opt(sched_hour, sched_minute, 0).unwrap()
-        } else if hour == sched_hour && minute > sched_minute {
-            // Next day
-            chrono::Utc::now().date_naive().next_day().unwrap_or_else(|| now.date_naive())
-                .and_hms_opt(sched_hour, sched_minute, 0).unwrap()
+        // Build the target time in the user's timezone
+        let today_naive = now_in_tz.date_naive();
+        let target_naive = today_naive
+            .and_hms_opt(sched_hour, sched_minute, 0)
+            .unwrap_or_else(|| {
+                (today_naive + chrono::Duration::days(1))
+                    .and_hms_opt(sched_hour, sched_minute, 0)
+                    .unwrap()
+            });
+        let target_in_tz = tz.from_utc_datetime(&target_naive);
+
+        let next_run = if now_in_tz >= target_in_tz {
+            // Past today, schedule for next day
+            let next_day_naive = (today_naive + chrono::Duration::days(1))
+                .and_hms_opt(sched_hour, sched_minute, 0)
+                .unwrap_or_else(|| {
+                    (today_naive + chrono::Duration::days(2))
+                        .and_hms_opt(sched_hour, sched_minute, 0)
+                        .unwrap()
+                });
+            tz.from_utc_datetime(&next_day_naive)
         } else {
-            chrono::Utc::now().date_naive().and_hms_opt(sched_hour, sched_minute, 0).unwrap()
+            target_in_tz
         };
 
-        let wait_duration = Duration::from_secs(
-            (next_run - now).num_seconds().max(0) as u64
-        );
+        // Convert back to UTC for sleep duration
+        let next_run_utc = next_run.with_timezone(&chrono::Utc);
+        let wait_duration = Duration::from_secs((next_run_utc - now).num_seconds().max(0) as u64);
 
-        log::info!("Next digest run: {} (waiting {} seconds)", 
-            next_run, wait_duration.as_secs());
+        log::info!(
+            "Next digest run: {} (waiting {} seconds)",
+            next_run,
+            wait_duration.as_secs()
+        );
 
         time::sleep(wait_duration).await;
 
         log::info!("Executing scheduled digest...");
-        generate_and_send_digest(
+        if let Err(e) = generate_and_send_digest(
             config.clone(),
             freshrss_client.clone(),
             qdrant_client.clone(),
             ollama_client.clone(),
             email_client.clone(),
-        ).await?;
+        )
+        .await
+        {
+            log::error!("Digest generation failed: {}", e);
+        }
 
         // Brief pause before next loop
         time::sleep(Duration::from_secs(60)).await;

@@ -1,0 +1,22 @@
+# cargo-deny configuration
+# https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
+
+[licenses]
+version = 2
+# Allow common permissive licenses
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "0BSD",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unlicense",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",  # webpki-roots
+]
+
+[advisories]
+ignore = ["RUSTSEC-2025-0134"]  # rustls-pemfile unmaintained, no upgrade path in qdrant-client/tonic
+
+[bans]
