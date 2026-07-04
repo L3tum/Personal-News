@@ -1,0 +1,106 @@
+# RSS Digest — complete stack with FreshRSS, Qdrant, Ollama, and digest service
+# Run with: docker compose up -d
+#
+# To use with GPU for Ollama:
+#   - uncomment the ollama service
+#   - ensure nvidia-container-toolkit is installed
+#   - set environment variable OLLAMA_MODELS=/root/.ollama/models
+
+services:
+  # RSS Digest service (runs scheduled digests internally)
+  rss_digest:
+    build: .
+    image: rss_digest:latest
+    container_name: rss_digest
+    restart: unless-stopped
+    environment:
+      # FreshRSS
+      FRESHRSS_URL: http://freshrss:8080
+      FRESHRSS_USERNAME: admin
+      FRESHRSS_PASSWORD: your_password
+      # Qdrant
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ""
+      QDRANT_COLLECTION: articles
+      EMBEDDING_MODEL: nomic-embed-text
+      CONTEXT_WINDOW_DAYS: 30
+      RAG_TOP_K: 5
+      # Ollama
+      OLLAMA_URL: http://ollama:11434
+      LLM_MODEL: llama3.1
+      # Email (SMTP)
+      SMTP_HOST: your.smtp.server
+      SMTP_PORT: 587
+      SMTP_USERNAME: your_email@gmail.com
+      SMTP_PASSWORD: your_password
+      SMTP_FROM: digest@yourdomain.com
+      # Cron schedule
+      CRON_TIME: "06:00"
+      CRON_TIMEZONE: UTC
+      # Users (JSON array — see .env.example for full example)
+      # USERS: '[{"name":"You","freshrss_user":"admin","email":"you@example.com","shared_feeds":[]}]'
+    depends_on:
+      - freshrss
+      - qdrant
+      - ollama
+
+  # FreshRSS — web-based RSS reader
+  freshrss:
+    image: freshrss/freshrss:latest
+    container_name: freshrss
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    environment:
+      - TZ=UTC
+      - CRON_MIN=1,31  # refresh feeds every 30 min
+    volumes:
+      - freshrss-data:/var/www/FreshRSS/data
+      - freshrss-extensions:/var/www/FreshRSS/extensions
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:80/p/i/index.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Qdrant — vector database for RAG context
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HOST=0.0.0.0
+      - QDRANT__SERVICE__PORT=6333
+
+  # Ollama — LLM inference (uncomment to run locally)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_MODELS=/root/.ollama/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # GPU support: requires nvidia-container-toolkit
+    # If you don't have a GPU, remove the deploy section above
+    # and Ollama will run on CPU (slower but functional).
+
+volumes:
+  freshrss-data:
+  freshrss-extensions:
+  qdrant-data:
+  ollama-data:

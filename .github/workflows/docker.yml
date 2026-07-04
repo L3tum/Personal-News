@@ -1,0 +1,40 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types:
+      - published
+
+jobs:
+  should-push:
+    runs-on: ubuntu-latest
+    outputs:
+      should_push: ${{ steps.push_check.outputs.should_push }}
+    steps:
+      - id: push_check
+        run: |
+          if [ "${{github.event_name}}" = "release" ] && [ "${{github.event.action}}" = "published" ]; then
+            echo "should_push=true"
+            echo "should_push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_push=false"
+            echo "should_push=false" >> "$GITHUB_OUTPUT"
+          fi
+  build-forgejo:
+    needs: [should-push]
+    if: github.server_url != 'https://github.com'
+    uses: l3tum/reusable-workflows/.github/workflows/publish-forgejo.yml@main
+    with:
+      PUSH: ${{ needs.should-push.outputs.should_push }}
+    secrets:
+      PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+  build-gchr:
+    needs: [should-push]
+    if: github.server_url == 'https://github.com'
+    uses: l3tum/reusable-workflows/.github/workflows/publish-gchr.yml@main
+    with:
+      PUSH: ${{ needs.should-push.outputs.should_push }}
