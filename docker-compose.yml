@@ -23,6 +23,7 @@ services:
       QDRANT_API_KEY: ""
       QDRANT_COLLECTION: articles
       EMBEDDING_MODEL: nomic-embed-text
+      EMBEDDING_URL: http://ollama:11434   # OpenAI-compatible endpoint
       EMBEDDING_DIM: 768
       CONTEXT_WINDOW_DAYS: 30
       RAG_TOP_K: 5
@@ -35,9 +36,10 @@ services:
       SMTP_USERNAME: your_email@gmail.com
       SMTP_PASSWORD: your_password
       SMTP_FROM: digest@yourdomain.com
-      # Cron schedule
-      CRON_TIME: "06:00"
-      CRON_TIMEZONE: UTC
+      # Cron schedule (defaults in Dockerfile: 06:00 UTC)
+      # Override if needed:
+      # CRON_TIME: "06:00"
+      # CRON_TIMEZONE: UTC
       # Users (JSON array — see .env.example for full example)
       # USERS: '[{"name":"You","freshrss_user":"admin","email":"you@example.com","shared_feeds":[]}]'
     depends_on:

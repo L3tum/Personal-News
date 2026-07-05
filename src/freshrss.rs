@@ -38,8 +38,9 @@ impl FreshRSSClient {
         user: &str,
         since: i64,
     ) -> anyhow::Result<Vec<Article>> {
+        let encoded_user = urlencoding::encode(user);
         let url = format!("{}/api/g.php?get=entries&user={}&feeds=-1&state=_notread&since={}&order=desc&sort=date&export=flatjson",
-            self.config.url, user, since);
+            self.config.url, encoded_user, since);
 
         let response = self
             .client
@@ -49,7 +50,9 @@ impl FreshRSSClient {
             .await?;
 
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("FreshRSS API error: {}", response.status()));
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!("FreshRSS API error: {} - {}", status, body));
         }
 
         let entries: Value = response.json().await?;

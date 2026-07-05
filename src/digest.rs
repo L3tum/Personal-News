@@ -1,12 +1,48 @@
 use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::sleep;
 
 use crate::config::AppConfig;
 use crate::email::EmailClient;
 use crate::freshrss::FreshRSSClient;
-use crate::ollama::OllamaClient;
+use crate::llm::LlmClient;
 use crate::qdrant::QdrantClientWrapper;
+
+/// Retry an async operation with exponential backoff (1s, 2s, 4s).
+/// Returns the first successful result, or the last error after max_retries attempts.
+async fn retry_with_backoff<F, Fut, T>(max_retries: usize, operation: F) -> anyhow::Result<T>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let mut delay = Duration::from_secs(1);
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        match operation().await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                if attempts > max_retries {
+                    return Err(e);
+                }
+                log::warn!(
+                    "Operation failed (attempt {}/{}), retrying in {:?}: {}",
+                    attempts,
+                    max_retries + 1,
+                    delay,
+                    e
+                );
+                sleep(delay).await;
+                delay *= 2;
+                if delay > Duration::from_secs(10) {
+                    delay = Duration::from_secs(10);
+                }
+            }
+        }
+    }
+}
 
 /// Combine per-article semantic RAG with recent digest context
 fn combine_rag_context(semantic: &[serde_json::Value], recent: &[serde_json::Value]) -> String {
@@ -50,7 +86,7 @@ pub async fn generate_and_send_digest(
     config: Arc<AppConfig>,
     freshrss_client: Arc<FreshRSSClient>,
     qdrant_client: Arc<QdrantClientWrapper>,
-    ollama_client: Arc<OllamaClient>,
+    llm_client: Arc<LlmClient>,
     email_client: Arc<EmailClient>,
 ) -> anyhow::Result<()> {
     log::info!("Starting daily digest generation...");
@@ -59,14 +95,26 @@ pub async fn generate_and_send_digest(
     let since = now.timestamp() - 86400; // last 24 hours
     let date_str = now.format("%Y-%m-%d").to_string();
 
-    // For each user, fetch their unread articles
+    // For each user, fetch their unread articles with retry and per-user fault isolation
     for user_config in &config.users {
         log::info!("Processing user: {}", user_config.name);
 
-        // Fetch unread articles for this user
-        let articles = freshrss_client
-            .fetch_unread_articles(&user_config.freshrss_user, since)
-            .await?;
+        // Fetch unread articles for this user with retry-backoff
+        let articles = match retry_with_backoff(3, || {
+            freshrss_client.fetch_unread_articles(&user_config.freshrss_user, since)
+        })
+        .await
+        {
+            Ok(articles) => articles,
+            Err(e) => {
+                log::error!(
+                    "Failed to fetch articles for {} after retries: {}. Skipping user.",
+                    user_config.name,
+                    e
+                );
+                continue;
+            }
+        };
 
         if articles.is_empty() {
             log::info!("No unread articles for {}", user_config.name);
@@ -101,7 +149,7 @@ pub async fn generate_and_send_digest(
             let combined_rag = combine_rag_context(&semantic_context, &recent_context);
 
             // Summarize this article
-            let summary = ollama_client
+            let summary = llm_client
                 .summarize_article(&combined_rag, &article.title, &article.content)
                 .await
                 .unwrap_or_else(|e| {
@@ -130,7 +178,7 @@ pub async fn generate_and_send_digest(
             .join("\n\n");
 
         // Generate overall digest paragraph connecting stories
-        let overall_digest = ollama_client
+        let overall_digest = llm_client
             .generate_overall_digest(&today_rag, &article_summaries, &date_str)
             .await
             .unwrap_or_else(|e| {
@@ -140,21 +188,37 @@ pub async fn generate_and_send_digest(
 
         log::info!("Generated digest for {}", user_config.name);
 
-        // Mark articles as read in FreshRSS
+        // Mark articles as read in FreshRSS with retry
         let ids: Vec<u64> = articles.iter().map(|a| a.id).collect();
-        freshrss_client
-            .mark_as_read(&user_config.freshrss_user, &ids)
-            .await?;
+        if let Err(e) = retry_with_backoff(3, || {
+            freshrss_client.mark_as_read(&user_config.freshrss_user, &ids)
+        })
+        .await
+        {
+            log::error!(
+                "Failed to mark articles as read for {} after retries: {}. Continuing anyway.",
+                user_config.name,
+                e
+            );
+        }
 
-        // Send email
+        // Send email with retry-backoff
         let subject = format!("📰 Daily News Digest - {}", date_str);
-        email_client
-            .send_digest(
+        if let Err(e) = retry_with_backoff(3, || {
+            email_client.send_digest(
                 &subject,
                 &overall_digest,
                 std::slice::from_ref(&user_config.email),
             )
-            .await?;
+        })
+        .await
+        {
+            log::error!(
+                "Failed to send digest to {} after retries: {}. Skipping email.",
+                user_config.name,
+                e
+            );
+        }
     }
 
     log::info!("Digest generation complete!");

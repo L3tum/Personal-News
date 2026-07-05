@@ -23,6 +23,7 @@ pub struct QdrantConfig {
     pub api_key: Option<String>,
     pub collection: String,
     pub embedding_model: String, // e.g., "nomic-embed-text" or "all-MiniLM-L6-v2"
+    pub embedding_url: String,   // OpenAI-compatible embedding endpoint base URL
     pub embedding_dim: usize,    // vector dimension for the collection (default 768)
     pub context_window_days: i64,
     pub top_k: usize,
@@ -78,6 +79,9 @@ impl AppConfig {
                 collection: std::env::var("QDRANT_COLLECTION").unwrap_or("articles".to_string()),
                 embedding_model: std::env::var("EMBEDDING_MODEL")
                     .unwrap_or("nomic-embed-text".to_string()),
+                embedding_url: std::env::var("EMBEDDING_URL").unwrap_or_else(|_| {
+                    std::env::var("OLLAMA_URL").unwrap_or("http://localhost:11434".to_string())
+                }),
                 embedding_dim: std::env::var("EMBEDDING_DIM")
                     .ok()
                     .and_then(|s| s.parse().ok())

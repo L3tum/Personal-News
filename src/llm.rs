@@ -1,31 +1,12 @@
 use crate::config::OllamaConfig;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ChatRequest {
-    pub model: String,
-    pub messages: Vec<ChatMessage>,
-    pub stream: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ChatResponse {
-    pub message: ChatMessage,
-}
-
-pub struct OllamaClient {
+pub struct LlmClient {
     client: Client,
     config: OllamaConfig,
 }
 
-impl OllamaClient {
+impl LlmClient {
     pub fn new(config: OllamaConfig) -> Self {
         Self {
             client: Client::builder()
@@ -36,33 +17,38 @@ impl OllamaClient {
         }
     }
 
-    /// Generate a completion with chat completion API
+    /// Generate a completion using OpenAI-compatible /v1/chat/completions API
     pub async fn chat(&self, prompt: &str) -> anyhow::Result<String> {
-        let request = ChatRequest {
-            model: self.config.model.clone(),
-            messages: vec![ChatMessage {
-                role: "system".to_string(),
-                content: String::from(
-                    "You are a news digest summarizer. You provide concise, accurate summaries with narrative continuity.",
-                ),
-            }, ChatMessage {
-                role: "user".to_string(),
-                content: prompt.to_string(),
-            }],
-            stream: false,
-        };
+        let body = serde_json::json!({
+            "model": self.config.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a news digest summarizer. You provide concise, accurate summaries with narrative continuity."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "stream": false
+        });
 
-        let url = format!("{}/api/chat", self.config.url);
-        let response = self.client.post(&url).json(&request).send().await?;
+        let url = format!("{}/v1/chat/completions", self.config.url);
+        let response = self.client.post(&url).json(&body).send().await?;
 
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await?;
-            return Err(anyhow::anyhow!("Ollama error: {} - {}", status, body));
+            let body_text = response.text().await?;
+            return Err(anyhow::anyhow!("LLM error: {} - {}", status, body_text));
         }
 
-        let result: ChatResponse = response.json().await?;
-        Ok(result.message.content)
+        let result: serde_json::Value = response.json().await?;
+        let content = result["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Unexpected response format from LLM"))?
+            .to_string();
+        Ok(content)
     }
 
     /// Summarize a single article using RAG context

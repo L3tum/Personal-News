@@ -2,7 +2,7 @@ mod config;
 mod digest;
 mod email;
 mod freshrss;
-mod ollama;
+mod llm;
 mod qdrant;
 
 use chrono::TimeZone;
@@ -12,7 +12,7 @@ use config::AppConfig;
 use digest::generate_and_send_digest;
 use email::EmailClient;
 use freshrss::FreshRSSClient;
-use ollama::OllamaClient;
+use llm::LlmClient;
 use qdrant::QdrantClientWrapper;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -43,8 +43,8 @@ async fn main() -> anyhow::Result<()> {
     let qdrant_client = QdrantClientWrapper::new(config.qdrant.clone()).await?;
     let qdrant_client = Arc::new(qdrant_client);
 
-    let ollama_client = OllamaClient::new(config.ollama.clone());
-    let ollama_client = Arc::new(ollama_client);
+    let llm_client = LlmClient::new(config.ollama.clone());
+    let llm_client = Arc::new(llm_client);
 
     let email_client = EmailClient::new(config.smtp.clone())?;
     let email_client = Arc::new(email_client);
@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
             config.clone(),
             freshrss_client.clone(),
             qdrant_client.clone(),
-            ollama_client.clone(),
+            llm_client.clone(),
             email_client.clone(),
         )
         .await?;
@@ -128,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
             config.clone(),
             freshrss_client.clone(),
             qdrant_client.clone(),
-            ollama_client.clone(),
+            llm_client.clone(),
             email_client.clone(),
         )
         .await

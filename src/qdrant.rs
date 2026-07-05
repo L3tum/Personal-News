@@ -21,8 +21,9 @@ pub struct ArticlePayload {
 }
 
 pub struct QdrantClientWrapper {
-    client: Qdrant,
+    qdrant: Qdrant,
     config: QdrantConfig,
+    http_client: reqwest::Client,
 }
 
 impl QdrantClientWrapper {
@@ -31,18 +32,28 @@ impl QdrantClientWrapper {
         if let Some(api_key) = &config.api_key {
             builder = builder.api_key(api_key.as_str());
         }
-        let client = builder
+        let qdrant = builder
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to connect to Qdrant: {e}"))?;
 
-        let wrapper = Self { client, config };
+        // Create a shared HTTP client for embedding requests
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client for embeddings: {e}"))?;
+
+        let wrapper = Self {
+            qdrant,
+            config,
+            http_client,
+        };
         wrapper.ensure_collection().await?;
         Ok(wrapper)
     }
 
     async fn ensure_collection(&self) -> anyhow::Result<()> {
         let collections = self
-            .client
+            .qdrant
             .list_collections()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to list collections: {e}"))?;
@@ -51,7 +62,7 @@ impl QdrantClientWrapper {
             .iter()
             .any(|c| c.name == self.config.collection);
         if !exists {
-            self.client
+            self.qdrant
                 .create_collection(
                     CreateCollectionBuilder::new(&self.config.collection).vectors_config(
                         VectorParamsBuilder::new(
@@ -72,21 +83,30 @@ impl QdrantClientWrapper {
     }
 
     pub async fn embed_text(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-        let client = reqwest::Client::new();
-        let url = format!(
-            "{}/api/embed",
-            std::env::var("OLLAMA_URL").unwrap_or("http://localhost:11434".to_string())
-        );
-        let response = client
+        let url = format!("{}/v1/embeddings", self.config.embedding_url);
+        let response = self
+            .http_client
             .post(&url)
             .json(&serde_json::json!({
                 "model": self.config.embedding_model,
                 "input": text,
             }))
             .send()
-            .await?;
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch embedding from {}: {}", url, e))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!(
+                "Embedding API error: {} - {}",
+                status,
+                body
+            ));
+        }
+
         let body: serde_json::Value = response.json().await?;
-        let embedding = body["embeddings"][0]
+        let embedding = body["data"][0]["embedding"]
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("Unexpected embedding format"))?
             .iter()
@@ -115,15 +135,20 @@ impl QdrantClientWrapper {
         let payload_json = serde_json::to_value(&payload)?;
         let payload: Payload = Payload::try_from(payload_json)
             .map_err(|e| anyhow::anyhow!("Failed to create payload: {e}"))?;
+        let content_preview: String = article.content.trim().chars().take(500).collect();
+        if article.content.trim().len() > 500 {
+            log::warn!(
+                "Article content truncated from {} to {} chars for embedding: {}",
+                article.content.trim().len(),
+                500,
+                article.title
+            );
+        }
         let embedding = self
-            .embed_text(&format!(
-                "{} {}",
-                article.title,
-                article.content.trim().chars().take(500).collect::<String>()
-            ))
+            .embed_text(&format!("{} {}", article.title, content_preview))
             .await?;
 
-        self.client
+        self.qdrant
             .upsert_points(
                 UpsertPointsBuilder::new(
                     &self.config.collection,
@@ -144,7 +169,7 @@ impl QdrantClientWrapper {
     ) -> anyhow::Result<Vec<serde_json::Value>> {
         let query_embedding = self.embed_text(query).await?;
         let response = self
-            .client
+            .qdrant
             .query(
                 QueryPointsBuilder::new(&self.config.collection)
                     .query(query_embedding)
@@ -169,7 +194,7 @@ impl QdrantClientWrapper {
     ) -> anyhow::Result<Vec<serde_json::Value>> {
         let since = chrono::Utc::now().timestamp() - (days * 86400);
         let response = self
-            .client
+            .qdrant
             .scroll(
                 ScrollPointsBuilder::new(&self.config.collection)
                     .filter(Filter::must([Condition::range(
@@ -209,7 +234,7 @@ impl QdrantClientWrapper {
             })
             .try_into()
             .map_err(|e| anyhow::anyhow!("Failed to create payload: {e}"))?;
-            self.client
+            self.qdrant
                 .set_payload(
                     SetPayloadPointsBuilder::new(&self.config.collection, payload)
                         .points_selector(Filter::must([Condition::matches("url", url.clone())]))
