@@ -77,14 +77,22 @@ impl AppConfig {
     pub fn load_from_env() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok(); // load .env if exists
 
+        // Helper to get a required environment variable with a clear error message
+        macro_rules! required_env {
+            ($name:expr) => {
+                std::env::var($name)
+                    .map_err(|_| anyhow::anyhow!("Environment variable {} is not set", $name))
+            };
+        }
+
         Ok(AppConfig {
             freshrss: FreshRSSConfig {
-                url: std::env::var("FRESHRSS_URL")?,
-                username: std::env::var("FRESHRSS_USERNAME")?,
-                password: std::env::var("FRESHRSS_PASSWORD")?,
+                url: required_env!("FRESHRSS_URL")?,
+                username: required_env!("FRESHRSS_USERNAME")?,
+                password: required_env!("FRESHRSS_PASSWORD")?,
             },
             qdrant: QdrantConfig {
-                url: std::env::var("QDRANT_URL")?,
+                url: required_env!("QDRANT_URL")?,
                 api_key: std::env::var("QDRANT_API_KEY").ok(),
                 collection: std::env::var("QDRANT_COLLECTION").unwrap_or("articles".to_string()),
                 embedding_model: std::env::var("EMBEDDING_MODEL")
@@ -116,18 +124,18 @@ impl AppConfig {
                     .unwrap_or(Self::default_article_prompt()),
             },
             libretranslate: LibreTranslateConfig {
-                url: std::env::var("LIBRETRANSLATE_URL")?,
+                url: required_env!("LIBRETRANSLATE_URL")?,
                 api_key: std::env::var("LIBRETRANSLATE_API_KEY").ok(),
             },
             smtp: SmtpConfig {
-                host: std::env::var("SMTP_HOST")?,
+                host: required_env!("SMTP_HOST")?,
                 port: std::env::var("SMTP_PORT")
                     .ok()
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(587),
-                username: std::env::var("SMTP_USERNAME")?,
-                password: std::env::var("SMTP_PASSWORD")?,
-                from: std::env::var("SMTP_FROM")?,
+                username: required_env!("SMTP_USERNAME")?,
+                password: required_env!("SMTP_PASSWORD")?,
+                from: required_env!("SMTP_FROM")?,
                 tls_mode: std::env::var("SMTP_TLS_MODE").unwrap_or("starttls".to_string()),
             },
             users: std::env::var("USERS")
@@ -136,7 +144,12 @@ impl AppConfig {
                 .unwrap_or(vec![UserConfig {
                     name: "Default".to_string(),
                     freshrss_user: "admin".to_string(),
-                    email: std::env::var("DEFAULT_EMAIL")?,
+                    email: std::env::var("DEFAULT_EMAIL")
+                        .map_err(|_| {
+                            anyhow::anyhow!(
+                                "Environment variable DEFAULT_EMAIL is not set (required when USERS is not provided)"
+                            )
+                        })?,
                     target_language: None,
                     shared_feeds: None,
                 }]),
