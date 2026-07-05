@@ -23,6 +23,7 @@ services:
       QDRANT_API_KEY: ""
       QDRANT_COLLECTION: articles
       EMBEDDING_MODEL: nomic-embed-text
+      EMBEDDING_DIM: 768
       CONTEXT_WINDOW_DAYS: 30
       RAG_TOP_K: 5
       # Ollama

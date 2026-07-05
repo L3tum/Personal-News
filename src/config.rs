@@ -23,6 +23,7 @@ pub struct QdrantConfig {
     pub api_key: Option<String>,
     pub collection: String,
     pub embedding_model: String, // e.g., "nomic-embed-text" or "all-MiniLM-L6-v2"
+    pub embedding_dim: usize,    // vector dimension for the collection (default 768)
     pub context_window_days: i64,
     pub top_k: usize,
 }
@@ -32,6 +33,7 @@ pub struct OllamaConfig {
     pub url: String,
     pub model: String, // e.g., "llama3.1" or "mistral"
     pub summarizer_prompt: String,
+    pub article_summary_prompt: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -49,8 +51,9 @@ pub struct UserConfig {
     pub name: String,
     pub freshrss_user: String,
     pub email: String,
+    // TODO: shared_feeds — allow users to share feeds (reserved for future use)
     #[allow(dead_code)]
-    pub shared_feeds: Option<Vec<String>>, // feed IDs to share with other users
+    pub shared_feeds: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -75,6 +78,10 @@ impl AppConfig {
                 collection: std::env::var("QDRANT_COLLECTION").unwrap_or("articles".to_string()),
                 embedding_model: std::env::var("EMBEDDING_MODEL")
                     .unwrap_or("nomic-embed-text".to_string()),
+                embedding_dim: std::env::var("EMBEDDING_DIM")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(768),
                 context_window_days: std::env::var("CONTEXT_WINDOW_DAYS")
                     .ok()
                     .and_then(|s| s.parse().ok())
@@ -90,6 +97,9 @@ impl AppConfig {
                 summarizer_prompt: std::env::var("LLM_PROMPT")
                     .ok()
                     .unwrap_or(Self::default_prompt()),
+                article_summary_prompt: std::env::var("ARTICLE_SUMMARY_PROMPT")
+                    .ok()
+                    .unwrap_or(Self::default_article_prompt()),
             },
             smtp: SmtpConfig {
                 host: std::env::var("SMTP_HOST")?,
@@ -120,32 +130,41 @@ impl AppConfig {
 
     fn default_prompt() -> String {
         String::from(
-            r#"You are an expert RSS digest summarizer. 
+            r#"You are an expert RSS digest summarizer.
 
-## Context from Recent Articles
+## Context from Today's Events and Predictions
 {rag_context}
 
-## New Articles
+## Article Summaries (for reference)
 {articles}
 
 ## Your Task
-1. For each new article, provide a very short summary (one sentence, max 30 words).
-2. Include a clickable link to the article in the format: [Link](URL).
-3. Create an overall digest paragraph (max 200 words) that connects related stories, references past events, and provides narrative continuity.
-4. If the context mentions past events, use that to provide continuity (e.g., "The war that started last week has now..." ).
+Create an overall digest paragraph (max 200 words) that connects the articles together narratively, referencing the context from today's events and predictions. Include the link to each article after its summary if needed.
 
-Format your response as:
-
+Format:
 **Daily Digest: {date}**
 
 **Article Summaries:**
-- {article title} — {summary} — [Link]({url})
-- {article title} — {summary} — [Link]({url})
+{articles}
 
 **Overall Summary:**
 {overall_digest_paragraph}
 
 Output plain Markdown, no extra formatting."#,
+        )
+    }
+
+    fn default_article_prompt() -> String {
+        String::from(
+            r#"## Context: Related Past Articles
+{rag_context}
+
+## New Article
+{article_title}
+{article_content}
+
+## Your Task
+Write a one-sentence summary (max 30 words) of the article, referencing any relevant past context. Just return the summary text, nothing else."#,
         )
     }
 }

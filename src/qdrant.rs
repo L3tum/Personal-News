@@ -53,12 +53,20 @@ impl QdrantClientWrapper {
         if !exists {
             self.client
                 .create_collection(
-                    CreateCollectionBuilder::new(&self.config.collection)
-                        .vectors_config(VectorParamsBuilder::new(768, Distance::Cosine)),
+                    CreateCollectionBuilder::new(&self.config.collection).vectors_config(
+                        VectorParamsBuilder::new(
+                            self.config.embedding_dim as u64,
+                            Distance::Cosine,
+                        ),
+                    ),
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to create collection: {e}"))?;
-            log::info!("Created collection: {}", self.config.collection);
+            log::info!(
+                "Created collection: {} with {} dimensions",
+                self.config.collection,
+                self.config.embedding_dim
+            );
         }
         Ok(())
     }

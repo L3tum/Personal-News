@@ -1,4 +1,5 @@
 use chrono::Utc;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::config::AppConfig;
@@ -6,6 +7,44 @@ use crate::email::EmailClient;
 use crate::freshrss::FreshRSSClient;
 use crate::ollama::OllamaClient;
 use crate::qdrant::QdrantClientWrapper;
+
+/// Combine per-article semantic RAG with recent digest context
+fn combine_rag_context(semantic: &[serde_json::Value], recent: &[serde_json::Value]) -> String {
+    let mut parts = Vec::new();
+
+    if !semantic.is_empty() {
+        let text = semantic
+            .iter()
+            .filter_map(|v| v.get("summary").and_then(|s| s.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if !text.is_empty() {
+            parts.push(format!("## Related Past Articles\n{}", text));
+        }
+    }
+
+    if !recent.is_empty() {
+        let text = recent
+            .iter()
+            .filter_map(|v| {
+                let title = v.get("title").and_then(|t| t.as_str()).unwrap_or("");
+                let summary = v.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+                let digest_date = v.get("digest_date").and_then(|d| d.as_str()).unwrap_or("");
+                if !summary.is_empty() {
+                    Some(format!("- **{}** ({}): {}", title, digest_date, summary))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !text.is_empty() {
+            parts.push(format!("## Recent Digest Context\n{}", text));
+        }
+    }
+
+    parts.join("\n\n")
+}
 
 pub async fn generate_and_send_digest(
     config: Arc<AppConfig>,
@@ -40,70 +79,66 @@ pub async fn generate_and_send_digest(
             user_config.name
         );
 
-        let articles_clone = articles.clone();
+        let mut article_summaries: HashMap<String, String> = HashMap::new();
 
-        // Parallel embedding and storage
-        let tasks: Vec<_> = articles_clone
-            .iter()
-            .map(|article| {
-                let qdrant = Arc::clone(&qdrant_client);
-                let digest_date = date_str.clone();
-                async move {
-                    // Simple one-sentence summary
-                    let summary = format!("Summary needed: {}", &article.title);
-                    qdrant
-                        .upsert_article(article, Some(summary), digest_date)
-                        .await
-                }
-            })
-            .collect();
+        // Process each article: upsert, get RAG context, summarize, store summary immediately
+        for article in &articles {
+            // Upsert article with placeholder summary
+            qdrant_client
+                .upsert_article(article, None, date_str.clone())
+                .await
+                .unwrap_or_else(|e| log::warn!("Failed to upsert {}: {}", article.title, e));
 
-        for task in tasks {
-            if let Err(e) = task.await {
-                log::warn!("Failed to upsert article: {}", e);
+            // Get per-article RAG context (semantic + recent)
+            let semantic_context = qdrant_client
+                .retrieve_rag_context(&article.title, config.qdrant.top_k)
+                .await
+                .unwrap_or_default();
+            let recent_context = qdrant_client
+                .get_recent_articles(config.qdrant.context_window_days, 5)
+                .await
+                .unwrap_or_default();
+            let combined_rag = combine_rag_context(&semantic_context, &recent_context);
+
+            // Summarize this article
+            let summary = ollama_client
+                .summarize_article(&combined_rag, &article.title, &article.content)
+                .await
+                .unwrap_or_else(|e| {
+                    log::warn!("Failed to summarize {}: {}", article.title, e);
+                    article.title.clone()
+                });
+
+            // Store summary immediately
+            let mut summary_map = HashMap::new();
+            summary_map.insert(article.url.clone(), summary.clone());
+            if let Err(e) = qdrant_client.update_article_summaries(&summary_map).await {
+                log::warn!("Failed to store summary for {}: {}", article.title, e);
             }
+            article_summaries.insert(article.url.clone(), summary);
         }
 
-        // Build RAG query from actual article titles (semantic context)
-        let rag_query = articles
+        // Query "today's events" RAG for overall digest context, formatted as a string
+        let today_rag_values = qdrant_client
+            .retrieve_rag_context(&format!("{} events predictions reminders", date_str), 5)
+            .await
+            .unwrap_or_default();
+        let today_rag = today_rag_values
             .iter()
-            .take(5) // enough topics, not the whole batch
-            .map(|a| a.title.clone())
+            .filter_map(|v| v.get("summary").and_then(|s| s.as_str()))
             .collect::<Vec<_>>()
-            .join(" ");
-        let rag_context = qdrant_client
-            .retrieve_rag_context(&rag_query, config.qdrant.top_k)
-            .await?;
+            .join("\n\n");
 
-        // Also search for articles mentioning today's date (predictions, reminders)
-        let today_rag = qdrant_client
-            .retrieve_rag_context(&format!("{} event prediction", date_str), 5)
-            .await?;
-
-        let recent_context = qdrant_client
-            .get_recent_articles(config.qdrant.context_window_days, 10)
-            .await?;
-
-        // Combine RAG context into a text block
-        let rag_text = format_rag_context(&rag_context, &today_rag, &recent_context);
-
-        // Generate digest using LLM
-        let digest = ollama_client
-            .generate_digest(&rag_text, &articles, &date_str)
-            .await?;
+        // Generate overall digest paragraph connecting stories
+        let overall_digest = ollama_client
+            .generate_overall_digest(&today_rag, &article_summaries, &date_str)
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("Failed to generate overall digest: {}", e);
+                "Unable to generate overall summary.".to_string()
+            });
 
         log::info!("Generated digest for {}", user_config.name);
-
-        // Extract article summaries from the digest output
-        let url_to_summary = extract_summaries_from_digest(&digest);
-        log::info!("Extracted {} summaries from digest", url_to_summary.len());
-
-        // Store summaries in Qdrant for future RAG context
-        if !url_to_summary.is_empty() {
-            qdrant_client
-                .update_article_summaries(&url_to_summary)
-                .await?;
-        }
 
         // Mark articles as read in FreshRSS
         let ids: Vec<u64> = articles.iter().map(|a| a.id).collect();
@@ -114,7 +149,11 @@ pub async fn generate_and_send_digest(
         // Send email
         let subject = format!("📰 Daily News Digest - {}", date_str);
         email_client
-            .send_digest(&subject, &digest, std::slice::from_ref(&user_config.email))
+            .send_digest(
+                &subject,
+                &overall_digest,
+                std::slice::from_ref(&user_config.email),
+            )
             .await?;
     }
 
@@ -122,106 +161,48 @@ pub async fn generate_and_send_digest(
     Ok(())
 }
 
-fn format_rag_context(
-    rag_results: &[serde_json::Value],
-    today_rag: &[serde_json::Value],
-    recent: &[serde_json::Value],
-) -> String {
-    let mut sections = Vec::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // Semantic context from topic query
-    if !rag_results.is_empty() {
-        let semantic = rag_results
-            .iter()
-            .filter_map(|v| v.get("summary").and_then(|s| s.as_str()))
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        if !semantic.is_empty() {
-            sections.push(format!("## Related Past Articles (Semantic)\n{}", semantic));
-        }
+    #[test]
+    fn test_combine_rag_context_empty() {
+        let semantic: Vec<serde_json::Value> = Vec::new();
+        let recent: Vec<serde_json::Value> = Vec::new();
+        let result = combine_rag_context(&semantic, &recent);
+        assert!(result.is_empty());
     }
 
-    // Today's date predictions/reminders
-    if !today_rag.is_empty() {
-        let today_items = today_rag
-            .iter()
-            .filter_map(|v| {
-                let title = v.get("title").and_then(|t| t.as_str()).unwrap_or("");
-                let summary = v.get("summary").and_then(|s| s.as_str()).unwrap_or("");
-                if !summary.is_empty() {
-                    Some(format!("- **{}**: {}", title, summary))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !today_items.is_empty() {
-            sections.push(format!(
-                "## Today's Date Mentions (Predictions/Reminders)\n{}",
-                today_items
-            ));
-        }
+    #[test]
+    fn test_combine_rag_context_with_data() {
+        let semantic = vec![serde_json::json!({
+            "summary": "Past event about X",
+            "title": "Old article"
+        })];
+        let recent = vec![serde_json::json!({
+            "summary": "Recent digest about Y",
+            "title": "Recent article",
+            "digest_date": "2025-07-01"
+        })];
+        let result = combine_rag_context(&semantic, &recent);
+        assert!(result.contains("Past event about X"));
+        assert!(result.contains("Recent digest about Y"));
+        assert!(result.contains("## Recent Digest Context"));
     }
 
-    // Recent context
-    if !recent.is_empty() {
-        let recent_list = recent
-            .iter()
-            .filter_map(|v| {
-                let title = v.get("title").and_then(|t| t.as_str()).unwrap_or("");
-                let summary = v.get("summary").and_then(|s| s.as_str()).unwrap_or("");
-                let digest_date = v.get("digest_date").and_then(|d| d.as_str()).unwrap_or("");
-                if !summary.is_empty() {
-                    Some(format!("- **{}** ({}): {}", title, digest_date, summary))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !recent_list.is_empty() {
-            sections.push(format!("## Recent Digest Context\n{}", recent_list));
-        }
+    #[test]
+    fn test_parse_cron_time_valid() {
+        use crate::parse_cron_time;
+        assert_eq!(parse_cron_time("06:00").unwrap(), (6, 0));
+        assert_eq!(parse_cron_time("14:30").unwrap(), (14, 30));
+        assert_eq!(parse_cron_time("23:59").unwrap(), (23, 59));
     }
 
-    sections.join("\n\n")
-}
-
-/// Extract article summaries from the digest output.
-/// Parses lines like: `- Title — summary — [Link](URL)`
-fn extract_summaries_from_digest(digest: &str) -> std::collections::HashMap<String, String> {
-    let mut map = std::collections::HashMap::new();
-
-    for line in digest.lines() {
-        // Match lines starting with "- " (article summaries)
-        if let Some(stripped) = line.strip_prefix("- ") {
-            // Split by " — " and take the summary and link parts
-            let parts: Vec<&str> = stripped.split(" — ").collect();
-            if parts.len() >= 2 {
-                let summary = parts[1].trim();
-                // Extract URL from [Link](URL)
-                if let Some(link_start) = summary.find("[Link](") {
-                    if let Some(link_end) = summary.find(")") {
-                        let url = summary[link_start..link_end + 1]
-                            .trim()
-                            .strip_prefix("[Link](")
-                            .unwrap_or("");
-                        if !url.is_empty() {
-                            // Clean up summary (remove the link part)
-                            let clean_summary = summary[..link_start].trim();
-                            if !clean_summary.is_empty() {
-                                map.insert(url.to_string(), clean_summary.to_string());
-                            }
-                        }
-                    }
-                } else {
-                    // No link, maybe the summary is the whole thing without URL
-                    // In that case, we can't match by URL, so skip
-                    log::debug!("Could not extract URL from summary: {}", line);
-                }
-            }
-        }
+    #[test]
+    fn test_parse_cron_time_invalid() {
+        use crate::parse_cron_time;
+        assert!(parse_cron_time("invalid").is_err());
+        assert!(parse_cron_time("60:00").is_err());
+        assert!(parse_cron_time("12:60").is_err());
     }
-    map
 }

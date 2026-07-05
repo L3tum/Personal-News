@@ -65,40 +65,43 @@ impl OllamaClient {
         Ok(result.message.content)
     }
 
-    /// Generate a full digest from articles and context
-    pub async fn generate_digest(
+    /// Summarize a single article using RAG context
+    pub async fn summarize_article(
         &self,
         rag_context: &str,
-        articles: &[crate::freshrss::Article],
+        title: &str,
+        content: &str,
+    ) -> anyhow::Result<String> {
+        let content_preview = content.trim().chars().take(800).collect::<String>();
+        let prompt = self
+            .config
+            .article_summary_prompt
+            .replace("{rag_context}", rag_context)
+            .replace("{article_title}", title)
+            .replace("{article_content}", &content_preview);
+        self.chat(&prompt).await
+    }
+
+    /// Generate an overall digest paragraph connecting related articles
+    pub async fn generate_overall_digest(
+        &self,
+        today_rag: &str,
+        article_summaries: &std::collections::HashMap<String, String>,
         date: &str,
     ) -> anyhow::Result<String> {
-        // Build articles list as markdown
-        let articles_text = articles
+        // Build article summaries list with links
+        let articles_text = article_summaries
             .iter()
-            .enumerate()
-            .map(|(i, article)| {
-                let content_preview = article.content.trim().chars().take(500).collect::<String>();
-                format!(
-                    "### {} - {} ({})
-**Content preview**: {}
-**URL**: {}",
-                    i + 1,
-                    article.title,
-                    article.feed_title,
-                    content_preview,
-                    article.url,
-                )
-            })
+            .map(|(url, summary)| format!("  - {summary} ([Link]({url}))"))
             .collect::<Vec<_>>()
-            .join("\n\n");
+            .join("\n");
 
         let prompt = self
             .config
             .summarizer_prompt
-            .replace("{rag_context}", rag_context)
+            .replace("{rag_context}", today_rag)
             .replace("{articles}", &articles_text)
             .replace("{date}", date);
-
         self.chat(&prompt).await
     }
 }
