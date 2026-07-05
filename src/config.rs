@@ -5,6 +5,7 @@ pub struct AppConfig {
     pub freshrss: FreshRSSConfig,
     pub qdrant: QdrantConfig,
     pub ollama: OllamaConfig,
+    pub libretranslate: LibreTranslateConfig,
     pub smtp: SmtpConfig,
     pub users: Vec<UserConfig>,
     pub cron: CronConfig,
@@ -30,6 +31,12 @@ pub struct QdrantConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct LibreTranslateConfig {
+    pub url: String, // e.g., "http://localhost:5000"
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct OllamaConfig {
     pub url: String,
     pub model: String, // e.g., "llama3.1" or "mistral"
@@ -52,6 +59,9 @@ pub struct UserConfig {
     pub name: String,
     pub freshrss_user: String,
     pub email: String,
+    /// Optional target language for translated summaries (ISO 639-1, e.g., "en", "de", "fr").
+    /// If set, summaries will be translated to this language. If None, no translation.
+    pub target_language: Option<String>,
     // TODO: shared_feeds — allow users to share feeds (reserved for future use)
     #[allow(dead_code)]
     pub shared_feeds: Option<Vec<String>>,
@@ -105,6 +115,10 @@ impl AppConfig {
                     .ok()
                     .unwrap_or(Self::default_article_prompt()),
             },
+            libretranslate: LibreTranslateConfig {
+                url: std::env::var("LIBRETRANSLATE_URL")?,
+                api_key: std::env::var("LIBRETRANSLATE_API_KEY").ok(),
+            },
             smtp: SmtpConfig {
                 host: std::env::var("SMTP_HOST")?,
                 port: std::env::var("SMTP_PORT")
@@ -123,6 +137,7 @@ impl AppConfig {
                     name: "Default".to_string(),
                     freshrss_user: "admin".to_string(),
                     email: std::env::var("DEFAULT_EMAIL")?,
+                    target_language: None,
                     shared_feeds: None,
                 }]),
             cron: CronConfig {

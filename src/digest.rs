@@ -89,6 +89,11 @@ pub async fn generate_and_send_digest(
     llm_client: Arc<LlmClient>,
     email_client: Arc<EmailClient>,
 ) -> anyhow::Result<()> {
+    use crate::translate::LibreTranslateClient;
+    let translate_client = LibreTranslateClient::new(
+        config.libretranslate.url.clone(),
+        config.libretranslate.api_key.clone(),
+    );
     log::info!("Starting daily digest generation...");
 
     let now = Utc::now();
@@ -127,13 +132,16 @@ pub async fn generate_and_send_digest(
             user_config.name
         );
 
-        let mut article_summaries: HashMap<String, String> = HashMap::new();
+        let mut article_summaries: HashMap<String, (String, Option<String>)> = HashMap::new();
+
+        // Cache: feed_url -> detected language, to avoid redundant detection calls
+        let mut feed_language_cache: HashMap<String, String> = HashMap::new();
 
         // Process each article: upsert, get RAG context, summarize, store summary immediately
         for article in &articles {
-            // Upsert article with placeholder summary
+            // Upsert article with placeholder summary (no translation yet)
             qdrant_client
-                .upsert_article(article, None, date_str.clone())
+                .upsert_article(article, None, None, date_str.clone())
                 .await
                 .unwrap_or_else(|e| log::warn!("Failed to upsert {}: {}", article.title, e));
 
@@ -157,13 +165,101 @@ pub async fn generate_and_send_digest(
                     article.title.clone()
                 });
 
-            // Store summary immediately
+            // Detect language and optionally translate for this user
+            // Prefer FreshRSS's feed-level language, with per-feed detection cache as fallback
+            let translated_summary = if let Some(ref target_lang) = user_config.target_language {
+                // First, try FreshRSS's own language field (if the feed has one)
+                // Fall back to per-feed detection cache, then to live detection
+                let detected = match (
+                    article.language.as_ref(),
+                    feed_language_cache.get(&article.feed_url),
+                ) {
+                    (Some(feed_lang), _) => {
+                        log::debug!("Using FreshRSS feed language: {}", feed_lang);
+                        Some(feed_lang.clone())
+                    }
+                    (None, Some(cached)) => {
+                        log::debug!("Using cached language: {}", cached);
+                        Some(cached.clone())
+                    }
+                    (None, None) => {
+                        // Detect language and cache it for this feed_url
+                        match translate_client.detect_language(&summary).await {
+                            Ok(lang) => {
+                                log::info!(
+                                    "Detected language {} for feed '{}' (cached for future articles)",
+                                    lang,
+                                    article.feed_title
+                                );
+                                feed_language_cache.insert(article.feed_url.clone(), lang.clone());
+                                Some(lang)
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "Language detection failed for {}: {} - using original summary",
+                                    article.title,
+                                    e
+                                );
+                                None
+                            }
+                        }
+                    }
+                };
+
+                if let Some(ref detected) = detected {
+                    // Only translate if the detected language differs from target
+                    if *detected != *target_lang {
+                        match translate_client
+                            .translate(&summary, detected, target_lang)
+                            .await
+                        {
+                            Ok(translated) => {
+                                log::debug!(
+                                    "Translated {} from {} to {} for {}",
+                                    article.title,
+                                    detected,
+                                    target_lang,
+                                    user_config.name
+                                );
+                                Some(translated)
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "Translation failed for {}: {} - using original summary",
+                                    article.title,
+                                    e
+                                );
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Store both summaries immediately
             let mut summary_map = HashMap::new();
-            summary_map.insert(article.url.clone(), summary.clone());
-            if let Err(e) = qdrant_client.update_article_summaries(&summary_map).await {
+            summary_map.insert(
+                article.url.clone(),
+                (summary.clone(), translated_summary.clone()),
+            );
+            if let Err(e) = qdrant_client
+                .update_article_summaries(&date_str, &summary_map)
+                .await
+            {
                 log::warn!("Failed to store summary for {}: {}", article.title, e);
             }
-            article_summaries.insert(article.url.clone(), summary);
+
+            // Store both original and translated summary for email
+            article_summaries.insert(
+                article.url.clone(),
+                (summary.clone(), translated_summary.clone()),
+            );
         }
 
         // Query "today's events" RAG for overall digest context, formatted as a string
@@ -179,7 +275,12 @@ pub async fn generate_and_send_digest(
 
         // Generate overall digest paragraph connecting stories
         let overall_digest = llm_client
-            .generate_overall_digest(&today_rag, &article_summaries, &date_str)
+            .generate_overall_digest(
+                &today_rag,
+                &article_summaries,
+                &date_str,
+                user_config.target_language.as_ref(),
+            )
             .await
             .unwrap_or_else(|e| {
                 log::warn!("Failed to generate overall digest: {}", e);

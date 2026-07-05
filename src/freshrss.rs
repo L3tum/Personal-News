@@ -13,7 +13,8 @@ pub struct Article {
     pub url: String,
     pub feed_title: String,
     pub feed_url: String,
-    pub published: i64, // Unix timestamp
+    pub language: Option<String>, // ISO 639-1 language code from the RSS feed, if available
+    pub published: i64,           // Unix timestamp
 }
 
 pub struct FreshRSSClient {
@@ -99,6 +100,11 @@ impl FreshRSSClient {
                 .get("author")
                 .and_then(|v| v.as_str())
                 .map(String::from);
+            // The language field is the RSS feed's primary language (ISO 639-1) if available
+            let language = entry
+                .get("language")
+                .and_then(|v| v.as_str())
+                .map(String::from);
 
             article_vec.push(Article {
                 id,
@@ -108,6 +114,7 @@ impl FreshRSSClient {
                 url,
                 feed_title,
                 feed_url,
+                language,
                 published,
             });
         }

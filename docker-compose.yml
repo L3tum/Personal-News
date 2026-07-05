@@ -30,6 +30,9 @@ services:
       # Ollama
       OLLAMA_URL: http://ollama:11434
       LLM_MODEL: llama3.1
+      # LibreTranslate (translation)
+      LIBRETRANSLATE_URL: http://libretranslate:5000
+      LIBRETRANSLATE_API_KEY: ""
       # Email (SMTP)
       SMTP_HOST: your.smtp.server
       SMTP_PORT: 587
@@ -46,6 +49,7 @@ services:
       - freshrss
       - qdrant
       - ollama
+      - libretranslate
 
   # FreshRSS — web-based RSS reader
   freshrss:
@@ -80,6 +84,16 @@ services:
       - QDRANT__SERVICE__HOST=0.0.0.0
       - QDRANT__SERVICE__PORT=6333
 
+  # LibreTranslate — self-hosted translation service
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    container_name: libretranslate
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - lt-data:/home/libretranslate/LibreTranslate/models
+
   # Ollama — LLM inference (uncomment to run locally)
   ollama:
     image: ollama/ollama:latest
@@ -107,3 +121,4 @@ volumes:
   freshrss-extensions:
   qdrant-data:
   ollama-data:
+  lt-data:

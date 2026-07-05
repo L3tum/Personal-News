@@ -72,13 +72,21 @@ impl LlmClient {
     pub async fn generate_overall_digest(
         &self,
         today_rag: &str,
-        article_summaries: &std::collections::HashMap<String, String>,
+        article_summaries: &std::collections::HashMap<String, (String, Option<String>)>,
         date: &str,
+        target_language: Option<&String>,
     ) -> anyhow::Result<String> {
         // Build article summaries list with links
+        // For users with target_language, show only the target language summary (translated or original)
         let articles_text = article_summaries
             .iter()
-            .map(|(url, summary)| format!("  - {summary} ([Link]({url}))"))
+            .map(|(url, (original, translated))| {
+                let display_text = match target_language {
+                    Some(_) => translated.as_deref().unwrap_or(original.as_str()),
+                    None => original.as_str(),
+                };
+                format!("  - {display_text} ([Link]({url}))")
+            })
             .collect::<Vec<_>>()
             .join("\n");
 

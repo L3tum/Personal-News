@@ -4,6 +4,7 @@ mod email;
 mod freshrss;
 mod llm;
 mod qdrant;
+mod translate;
 
 use chrono::TimeZone;
 use chrono_tz::Tz;
