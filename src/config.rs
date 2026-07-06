@@ -138,21 +138,44 @@ impl AppConfig {
                 from: required_env!("SMTP_FROM")?,
                 tls_mode: std::env::var("SMTP_TLS_MODE").unwrap_or("starttls".to_string()),
             },
-            users: std::env::var("USERS")
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or(vec![UserConfig {
-                    name: "Default".to_string(),
-                    freshrss_user: "admin".to_string(),
-                    email: std::env::var("DEFAULT_EMAIL")
-                        .map_err(|_| {
-                            anyhow::anyhow!(
-                                "Environment variable DEFAULT_EMAIL is not set (required when USERS is not provided)"
-                            )
-                        })?,
-                    target_language: None,
-                    shared_feeds: None,
-                }]),
+            users: {
+                let users_env = std::env::var("USERS");
+                if let Ok(s) = users_env {
+                    match serde_json::from_str::<Vec<UserConfig>>(&s) {
+                        Ok(users) => users,
+                        Err(e) => {
+                            log::error!("Failed to parse USERS variable (JSON parse error: {:?}), falling back to default user.", e);
+                            vec![UserConfig {
+                                name: "Default".to_string(),
+                                freshrss_user: "admin".to_string(),
+                                email: std::env::var("DEFAULT_EMAIL")
+                                    .map_err(|_| {
+                                        anyhow::anyhow!(
+                                            "Environment variable DEFAULT_EMAIL is not set (required when USERS cannot be parsed)"
+                                        )
+                                    })?,
+                                target_language: None,
+                                shared_feeds: None,
+                            }]
+                        }
+                    }
+                } else {
+                    // USERS not set at all
+                    log::warn!("USERS environment variable not set, using default user");
+                    vec![UserConfig {
+                        name: "Default".to_string(),
+                        freshrss_user: "admin".to_string(),
+                        email: std::env::var("DEFAULT_EMAIL")
+                            .map_err(|_| {
+                                anyhow::anyhow!(
+                                    "Environment variable DEFAULT_EMAIL is not set (required when USERS is not provided)"
+                                )
+                            })?,
+                        target_language: None,
+                        shared_feeds: None,
+                    }]
+                }
+            },
             cron: CronConfig {
                 time: std::env::var("CRON_TIME").unwrap_or("06:00".to_string()),
                 timezone: std::env::var("CRON_TIMEZONE").unwrap_or("UTC".to_string()),
