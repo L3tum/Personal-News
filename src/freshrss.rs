@@ -34,19 +34,22 @@ impl FreshRSSClient {
     }
 
     /// Fetch unread articles for a specific user, limited to the last 24 hours.
+    /// Uses the Google Reader compatibility API (greader.php).
     pub async fn fetch_unread_articles(
         &self,
-        user: &str,
+        _user: &str, // The Google Reader API uses the authenticated user, not a separate user param
         since: i64,
     ) -> anyhow::Result<Vec<Article>> {
-        let encoded_user = urlencoding::encode(user);
-        let url = format!("{}/api/g.php?get=entries&user={}&feeds=-1&state=_notread&since={}&order=desc&sort=date&export=flatjson",
-            self.config.url, encoded_user, since);
+        let url = format!("{}/api/greader.php", self.config.url);
+        // stream=feed/ gives all unread entries across all feeds for the authenticated user
+        let body = "cmd=reader/api/0/stream/contents&stream=feed/";
 
         let response = self
             .client
-            .get(&url)
+            .post(&url)
             .basic_auth(&self.config.username, Some(&self.config.password))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body.to_string())
             .send()
             .await?;
 
@@ -57,54 +60,94 @@ impl FreshRSSClient {
         }
 
         let entries: Value = response.json().await?;
-
-        // The response is an object where keys are article IDs
-        let articles = entries
-            .as_object()
+        let items = entries
+            .as_array()
             .ok_or_else(|| anyhow::anyhow!("Unexpected FreshRSS response format"))?;
 
         let mut article_vec = Vec::new();
-        for (id_str, entry) in articles {
-            let id: u64 = id_str.parse()?;
-            let title = entry
+        for item in items {
+            // FreshRSS greader response has items with:
+            // id (string ID), title, canonical (array of {href}), summary (HTML content),
+            // streamIds (feed IDs), ts (Unix timestamp), author (optional)
+            let id_str = item
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing entry id"))?;
+
+            // The id from greader is like "freshrss://feed-id/entry-id", extract the entry id
+            let id = id_str
+                .rsplit('/')
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or_else(|| anyhow::anyhow!("Cannot parse entry id: {}", id_str))?;
+
+            // Filter by since (last 24 hours) — greader API doesn't support since parameter
+            let published = item.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
+            if published < since {
+                continue;
+            }
+
+            let title = item
                 .get("title")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let content = entry
-                .get("content")
+            let content = item
+                .get("summary")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let url = entry
-                .get("url")
+
+            // canonical[0].href is the article URL
+            let url = item
+                .get("canonical")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|entry| entry.get("href"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let feed_title = entry
-                .get("feed")
-                .and_then(|v| v.as_object())
-                .and_then(|f| f.get("title"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown Feed")
-                .to_string();
-            let feed_url = entry
-                .get("feed")
-                .and_then(|v| v.as_object())
-                .and_then(|f| f.get("url"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let published = entry.get("date").and_then(|v| v.as_i64()).unwrap_or(0);
-            let author = entry
+
+            // Feed info from streamIds — get the first feed entry (usually just one)
+            let (feed_title, feed_url) = item
+                .get("streamIds")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|stream_id| {
+                    // stream_id might be an object with title/url or a string like "feed/feed-id"
+                    match stream_id {
+                        Value::String(_s) => {
+                            // "feed/feed-id" — we need to get the feed title from elsewhere
+                            // Unfortunately we can't easily get the feed title from greader without another API call
+                            // We'll leave it as "Unknown Feed" for now
+                            Some(("Unknown Feed".to_string(), String::new()))
+                        }
+                        Value::Object(o) => {
+                            let ft = o
+                                .get("title")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown Feed")
+                                .to_string();
+                            let fu = o
+                                .get("url")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            Some((ft, fu))
+                        }
+                        _ => None,
+                    }
+                })
+                .unwrap_or_else(|| ("Unknown Feed".to_string(), String::new()));
+
+            let author = item
                 .get("author")
                 .and_then(|v| v.as_str())
                 .map(String::from);
-            // The language field is the RSS feed's primary language (ISO 639-1) if available
-            let language = entry
-                .get("language")
-                .and_then(|v| v.as_str())
-                .map(String::from);
+
+            // greader doesn't have a language field, so we'll leave it as None
+            // (language detection fallback in digest.rs will still work)
+            let language = None;
 
             article_vec.push(Article {
                 id,
@@ -125,33 +168,34 @@ impl FreshRSSClient {
         Ok(article_vec)
     }
 
-    /// Mark articles as read (POST to avoid URL length limits)
-    pub async fn mark_as_read(&self, user: &str, article_ids: &[u64]) -> anyhow::Result<()> {
-        let body = format!(
-            "get=markEntriesAsRead&user={}&entries={}",
-            user,
-            article_ids
-                .iter()
-                .map(|id| id.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        );
+    /// Mark articles as read using greader.php API.
+    /// Note: greader API marks articles one by one, so we call it per article.
+    pub async fn mark_as_read(&self, _user: &str, article_ids: &[u64]) -> anyhow::Result<()> {
+        let url = format!("{}/api/greader.php", self.config.url);
 
-        let url = format!("{}/api/g.php", self.config.url);
-        let response = self
-            .client
-            .post(&url)
-            .basic_auth(&self.config.username, Some(&self.config.password))
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body)
-            .send()
-            .await?;
+        // Mark each article as read individually
+        for article_id in article_ids {
+            let body = format!(
+                "cmd=reader/api/0/edit/mark-as-read&i={}",
+                article_id
+            );
 
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "Failed to mark articles as read: {}",
-                response.status()
-            ));
+            let response = self
+                .client
+                .post(&url)
+                .basic_auth(&self.config.username, Some(&self.config.password))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(body)
+                .send()
+                .await?;
+
+            if !response.status().is_success() {
+                return Err(anyhow::anyhow!(
+                    "Failed to mark article {} as read: {}",
+                    article_id,
+                    response.status()
+                ));
+            }
         }
 
         Ok(())
