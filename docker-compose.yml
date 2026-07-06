@@ -19,7 +19,7 @@ services:
       FRESHRSS_USERNAME: admin
       FRESHRSS_PASSWORD: your_password
       # Qdrant
-      QDRANT_URL: http://qdrant:6333
+      QDRANT_URL: http://qdrant:6334
       QDRANT_API_KEY: ""
       QDRANT_COLLECTION: articles
       EMBEDDING_MODEL: nomic-embed-text
