@@ -40,24 +40,38 @@ See `docker-compose.yml` for a complete setup with FreshRSS, Qdrant, Ollama, and
 
 ## Important Notes
 
-### FreshRSS API Endpoint Configuration
-The digest uses the **Google Reader compatibility API** (`/api/greader.php`), which is the only API currently available in modern FreshRSS installations. The native `g.php` API is no longer used.
+### Per-User FreshRSS Authentication (Required for Multi-User)
+The digest uses the **Google Reader compatibility API** (`/api/greader.php`), which authenticates **as the user** and fetches articles for that user only. There is no `user=` parameter like the old `g.php` API — the API operates on the authenticated user.
 
-Verify the API works with curl:
-```bash
-curl -u admin:password "https://your-freshrss/api/greader.php" -d "cmd=reader/api/0/stream/contents&stream=feed/"
+Therefore, **each digest user must have their own FreshRSS account with a password**. In the `USERS` array, set `freshrss_username` and `freshrss_password` for each user:
+
+```json
+[
+  {
+    "name": "You",
+    "freshrss_username": "you",
+    "freshrss_password": "your_password_here",
+    "email": "you@example.com",
+    "target_language": null
+  },
+  {
+    "name": "Girlfriend",
+    "freshrss_username": "gf",
+    "freshrss_password": "gf_password",
+    "email": "gf@example.com",
+    "target_language": "en"
+  }
+]
 ```
 
-If you get authentication errors, see below.
+If you omit `freshrss_password` for a user, the global `FRESHRSS_USERNAME`/`PASSWORD` will be used (useful for a single-user setup).
+
+Verify a user's API access with curl:
+```bash
+curl -u you:your_password_here "https://your-freshrss/api/greader.php" -d "cmd=reader/api/0/stream/contents&stream=feed/"
+```
+
+If you get authentication errors, ensure the user has a FreshRSS password set (Administration → Access management → Password).
 
 ### FreshRSS URL Configuration
 The `FRESHRSS_URL` must include the full subpath where FreshRSS is installed (e.g., `https://example.com/freshrss/`), not just the domain.
-
-### Authentication (optional)
-The digest uses **basic authentication** (username/password) for the FreshRSS API. If you've disabled authentication in FreshRSS:
-- The code will still send the credentials, but FreshRSS will ignore them if auth is disabled.
-- Alternatively, you can modify `src/freshrss.rs` to remove the `.basic_auth()` call if your FreshRSS has no auth at all.
-
-If password authentication is required but disabled for a user:
-1. Go to FreshRSS → **Administration** → **Access management**
-2. Ensure the admin user's "Password" auth method is allowed.

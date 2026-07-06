@@ -105,8 +105,20 @@ pub async fn generate_and_send_digest(
         log::info!("Processing user: {}", user_config.name);
 
         // Fetch unread articles for this user with retry-backoff
-        let articles = match retry_with_backoff(3, || {
-            freshrss_client.fetch_unread_articles(&user_config.freshrss_user, since)
+        // Use per-user credentials (fallback to global admin if no user password is provided)
+        let user_freshrss_username = user_config.freshrss_username.clone();
+        let user_freshrss_password = user_config.freshrss_password.clone();
+        let freshrss_client_clone = Arc::clone(&freshrss_client);
+        let since_val = since;
+        let articles = match retry_with_backoff(3, move || {
+            let client = Arc::clone(&freshrss_client_clone);
+            let username = user_freshrss_username.clone();
+            let password = user_freshrss_password.clone();
+            async move {
+                client
+                    .fetch_unread_articles(&username, password.as_deref(), since_val)
+                    .await
+            }
         })
         .await
         {
@@ -291,8 +303,19 @@ pub async fn generate_and_send_digest(
 
         // Mark articles as read in FreshRSS with retry
         let ids: Vec<u64> = articles.iter().map(|a| a.id).collect();
-        if let Err(e) = retry_with_backoff(3, || {
-            freshrss_client.mark_as_read(&user_config.freshrss_user, &ids)
+        let user_freshrss_username = user_config.freshrss_username.clone();
+        let user_freshrss_password = user_config.freshrss_password.clone();
+        let freshrss_client_clone = Arc::clone(&freshrss_client);
+        if let Err(e) = retry_with_backoff(3, move || {
+            let client = Arc::clone(&freshrss_client_clone);
+            let username = user_freshrss_username.clone();
+            let password = user_freshrss_password.clone();
+            let ids_clone = ids.clone();
+            async move {
+                client
+                    .mark_as_read(&username, password.as_deref(), &ids_clone)
+                    .await
+            }
         })
         .await
         {

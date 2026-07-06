@@ -35,19 +35,25 @@ impl FreshRSSClient {
 
     /// Fetch unread articles for a specific user, limited to the last 24 hours.
     /// Uses the Google Reader compatibility API (greader.php).
+    ///
+    /// The API authenticates as the provided `username`, fetching articles for that user.
+    /// If `password` is None, falls back to the global admin credentials.
     pub async fn fetch_unread_articles(
         &self,
-        _user: &str, // The Google Reader API uses the authenticated user, not a separate user param
+        username: &str,
+        password: Option<&str>,
         since: i64,
     ) -> anyhow::Result<Vec<Article>> {
         let url = format!("{}/api/greader.php", self.config.url);
         // stream=feed/ gives all unread entries across all feeds for the authenticated user
         let body = "cmd=reader/api/0/stream/contents&stream=feed/";
 
+        let password_to_use = password.unwrap_or(&self.config.password);
+
         let response = self
             .client
             .post(&url)
-            .basic_auth(&self.config.username, Some(&self.config.password))
+            .basic_auth(username, Some(&password_to_use))
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(body.to_string())
             .send()
@@ -170,20 +176,25 @@ impl FreshRSSClient {
 
     /// Mark articles as read using greader.php API.
     /// Note: greader API marks articles one by one, so we call it per article.
-    pub async fn mark_as_read(&self, _user: &str, article_ids: &[u64]) -> anyhow::Result<()> {
+    ///
+    /// Authenticates as the provided `username` (or falls back to global admin).
+    pub async fn mark_as_read(
+        &self,
+        username: &str,
+        password: Option<&str>,
+        article_ids: &[u64],
+    ) -> anyhow::Result<()> {
         let url = format!("{}/api/greader.php", self.config.url);
+        let password_to_use = password.unwrap_or(&self.config.password);
 
         // Mark each article as read individually
         for article_id in article_ids {
-            let body = format!(
-                "cmd=reader/api/0/edit/mark-as-read&i={}",
-                article_id
-            );
+            let body = format!("cmd=reader/api/0/edit/mark-as-read&i={}", article_id);
 
             let response = self
                 .client
                 .post(&url)
-                .basic_auth(&self.config.username, Some(&self.config.password))
+                .basic_auth(username, Some(&password_to_use))
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .body(body)
                 .send()

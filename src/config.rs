@@ -14,6 +14,8 @@ pub struct AppConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct FreshRSSConfig {
     pub url: String,
+    #[allow(dead_code)]
+    // Used as fallback credentials when a user doesn't provide their own password
     pub username: String,
     pub password: String,
 }
@@ -57,7 +59,8 @@ pub struct SmtpConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct UserConfig {
     pub name: String,
-    pub freshrss_user: String,
+    pub freshrss_username: String,
+    pub freshrss_password: Option<String>,
     pub email: String,
     /// Optional target language for translated summaries (ISO 639-1, e.g., "en", "de", "fr").
     /// If set, summaries will be translated to this language. If None, no translation.
@@ -147,7 +150,8 @@ impl AppConfig {
                             log::error!("Failed to parse USERS variable (JSON parse error: {:?}), falling back to default user.", e);
                             vec![UserConfig {
                                 name: "Default".to_string(),
-                                freshrss_user: "admin".to_string(),
+                                freshrss_username: "admin".to_string(),
+                                freshrss_password: None, // will use global admin credentials
                                 email: std::env::var("DEFAULT_EMAIL")
                                     .map_err(|_| {
                                         anyhow::anyhow!(
@@ -164,7 +168,8 @@ impl AppConfig {
                     log::warn!("USERS environment variable not set, using default user");
                     vec![UserConfig {
                         name: "Default".to_string(),
-                        freshrss_user: "admin".to_string(),
+                        freshrss_username: "admin".to_string(),
+                        freshrss_password: None, // will use global admin credentials
                         email: std::env::var("DEFAULT_EMAIL")
                             .map_err(|_| {
                                 anyhow::anyhow!(
