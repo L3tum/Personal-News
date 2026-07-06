@@ -33,7 +33,9 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::init();
+    // Initialize logging with INFO level by default; set RUST_LOG env var to override
+    // (e.g., RUST_LOG=debug for verbose output, RUST_LOG=error for minimal)
+    env_logger::Builder::from_env(env_logger::Env::new().default_filter_or("info")).init();
 
     let config = AppConfig::load_from_env()?;
     let config = Arc::new(config);

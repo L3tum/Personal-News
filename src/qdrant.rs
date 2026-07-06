@@ -98,29 +98,42 @@ impl QdrantClientWrapper {
                 self.config.embedding_dim
             );
         } else {
-            // Collection exists — check vector schema and fail if it's the old single-vector schema
-            // Use the REST API to get collection info (gRPC client lacks collection_info method)
-            let collection_url =
-                format!("{}/collections/{}", self.config.url, self.config.collection);
-            let response = self
-                .http_client
-                .get(&collection_url)
-                .send()
+            // Collection exists — check vector schema via gRPC and fail if old single-vector schema
+            log::info!("Checking collection '{}' via gRPC", self.config.collection);
+            let collection_info = self
+                .qdrant
+                .collection_info(&self.config.collection)
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to fetch collection info: {e}"))?;
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to get collection info for '{}': {}",
+                        self.config.collection,
+                        e
+                    )
+                })?;
 
-            let body: serde_json::Value = response.json().await?;
-            // Extract the payload's vector config
-            let has_summary_vector = body["result"]["config"]["vectors"]
-                .get("summary_vector")
-                .is_some();
+            // Extract the vectors config to check for named vectors
+            let has_summary_vector = collection_info
+                .result
+                .as_ref()
+                .and_then(|info| info.config.as_ref())
+                .and_then(|config| config.params.as_ref())
+                .and_then(|params| params.vectors_config.as_ref())
+                .and_then(|vectors| vectors.config.as_ref())
+                .map(|config| match config {
+                    qdrant_client::qdrant::vectors_config::Config::ParamsMap(pm) => {
+                        pm.map.contains_key("summary_vector")
+                    }
+                    _ => false,
+                })
+                .unwrap_or(false);
 
             if !has_summary_vector {
                 panic!(
                     "Existing collection '{}' uses old single-vector schema. \
-                     Please delete the collection at {} and re-run the digest generation. \
+                     Please delete the collection and re-run the digest generation. \
                      Data will be re-created on next run.",
-                    self.config.collection, collection_url
+                    self.config.collection
                 );
             }
             log::info!(
@@ -133,6 +146,7 @@ impl QdrantClientWrapper {
 
     pub async fn embed_text(&self, text: &str) -> anyhow::Result<Vec<f32>> {
         let url = format!("{}/v1/embeddings", self.config.embedding_url);
+        log::info!("Fetching embedding from {}", url);
         let response = self
             .http_client
             .post(&url)
