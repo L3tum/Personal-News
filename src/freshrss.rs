@@ -65,7 +65,14 @@ impl FreshRSSClient {
             return Err(anyhow::anyhow!("FreshRSS API error: {} - {}", status, body));
         }
 
-        let entries: Value = response.json().await?;
+        let body_text = response.text().await?;
+        let entries: Value = serde_json::from_str(&body_text).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse FreshRSS response as JSON: {} — raw body: {}",
+                e,
+                body_text
+            )
+        })?;
         let items = entries
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("Unexpected FreshRSS response format"))?;
