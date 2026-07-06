@@ -47,6 +47,7 @@ impl FreshRSSClient {
         let url = format!("{}/api/greader.php", self.config.url);
         // stream=feed/ gives all unread entries across all feeds for the authenticated user
         let body = "cmd=reader/api/0/stream/contents&stream=feed/";
+        log::debug!("Fetching FreshRSS stream from: {}", url);
 
         let password_to_use = password.unwrap_or(&self.config.password);
 
@@ -65,14 +66,21 @@ impl FreshRSSClient {
             return Err(anyhow::anyhow!("FreshRSS API error: {} - {}", status, body));
         }
 
+        let status = response.status();
         let body_text = response.text().await?;
         let entries: Value = serde_json::from_str(&body_text).map_err(|e| {
             anyhow::anyhow!(
-                "Failed to parse FreshRSS response as JSON: {} — raw body: {}",
+                "Failed to parse FreshRSS response as JSON: {} — status: {} — raw body: {}",
                 e,
+                status,
                 body_text
             )
         })?;
+        log::debug!(
+            "FreshRSS returned {} entries for user {}",
+            entries.as_array().map(|a| a.len()).unwrap_or(0),
+            username
+        );
         let items = entries
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("Unexpected FreshRSS response format"))?;
