@@ -77,17 +77,16 @@ impl NativeFreshRSSClient {
             "limit": 500
         });
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&payload).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("FreshRSS entries API error: {} - {}", status, body));
+            return Err(anyhow::anyhow!(
+                "FreshRSS entries API error: {} - {}",
+                status,
+                body
+            ));
         }
 
         let entries: Vec<FreshRSSArticle> = response.json().await.map_err(|e| {
@@ -139,12 +138,7 @@ impl NativeFreshRSSClient {
             "ids": article_ids
         });
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&payload).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();

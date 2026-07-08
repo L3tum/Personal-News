@@ -184,7 +184,10 @@ pub async fn generate_and_send_digest(
                 // Fall back to per-feed detection cache, then to live detection
                 let detected = match (
                     article.language.as_ref(),
-                    article.feed_url.as_ref().and_then(|fu| feed_language_cache.get(fu)),
+                    article
+                        .feed_url
+                        .as_ref()
+                        .and_then(|fu| feed_language_cache.get(fu)),
                 ) {
                     (Some(feed_lang), _) => {
                         log::debug!("Using FreshRSS feed language: {}", feed_lang);

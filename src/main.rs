@@ -1,7 +1,8 @@
 mod config;
 mod digest;
 mod email;
-mod freshrss;       // greader API (legacy)
+#[allow(dead_code)] // legacy greader API, kept for reference
+mod freshrss;
 mod freshrss_native; // native JSON API
 mod llm;
 mod qdrant;
