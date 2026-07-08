@@ -1,7 +1,8 @@
 mod config;
 mod digest;
 mod email;
-mod freshrss;
+mod freshrss;       // greader API (legacy)
+mod freshrss_native; // native JSON API
 mod llm;
 mod qdrant;
 mod translate;
@@ -12,7 +13,7 @@ use clap::Parser;
 use config::AppConfig;
 use digest::generate_and_send_digest;
 use email::EmailClient;
-use freshrss::FreshRSSClient;
+use freshrss_native::NativeFreshRSSClient;
 use llm::LlmClient;
 use qdrant::QdrantClientWrapper;
 use std::str::FromStr;
@@ -40,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load_from_env()?;
     let config = Arc::new(config);
 
-    let freshrss_client = FreshRSSClient::new(config.freshrss.clone());
+    let freshrss_client = NativeFreshRSSClient::new(config.freshrss.clone());
     let freshrss_client = Arc::new(freshrss_client);
 
     let qdrant_client = QdrantClientWrapper::new(config.qdrant.clone()).await?;

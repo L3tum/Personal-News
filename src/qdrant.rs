@@ -8,13 +8,14 @@ use qdrant_client::{Payload, Qdrant};
 use serde::{Deserialize, Serialize};
 
 use crate::config::QdrantConfig;
+use crate::freshrss_native::Article;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ArticlePayload {
     pub title: String,
     pub url: String,
-    pub feed_title: String,
-    pub feed_url: String,
+    pub feed_title: Option<String>,
+    pub feed_url: Option<String>,
     pub author: Option<String>,
     pub content: String,
     pub summary: Option<String>,
@@ -180,7 +181,7 @@ impl QdrantClientWrapper {
 
     pub async fn upsert_article(
         &self,
-        article: &crate::freshrss::Article,
+        article: &Article,
         summary: Option<String>,
         translated_summary: Option<String>,
         digest_date: String,

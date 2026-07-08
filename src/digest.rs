@@ -6,7 +6,7 @@ use tokio::time::sleep;
 
 use crate::config::AppConfig;
 use crate::email::EmailClient;
-use crate::freshrss::FreshRSSClient;
+use crate::freshrss_native::NativeFreshRSSClient;
 use crate::llm::LlmClient;
 use crate::qdrant::QdrantClientWrapper;
 
@@ -84,7 +84,7 @@ fn combine_rag_context(semantic: &[serde_json::Value], recent: &[serde_json::Val
 
 pub async fn generate_and_send_digest(
     config: Arc<AppConfig>,
-    freshrss_client: Arc<FreshRSSClient>,
+    freshrss_client: Arc<NativeFreshRSSClient>,
     qdrant_client: Arc<QdrantClientWrapper>,
     llm_client: Arc<LlmClient>,
     email_client: Arc<EmailClient>,
@@ -184,7 +184,7 @@ pub async fn generate_and_send_digest(
                 // Fall back to per-feed detection cache, then to live detection
                 let detected = match (
                     article.language.as_ref(),
-                    feed_language_cache.get(&article.feed_url),
+                    article.feed_url.as_ref().and_then(|fu| feed_language_cache.get(fu)),
                 ) {
                     (Some(feed_lang), _) => {
                         log::debug!("Using FreshRSS feed language: {}", feed_lang);
@@ -201,9 +201,11 @@ pub async fn generate_and_send_digest(
                                 log::info!(
                                     "Detected language {} for feed '{}' (cached for future articles)",
                                     lang,
-                                    article.feed_title
+                                    article.feed_title.as_deref().unwrap_or("Unknown Feed")
                                 );
-                                feed_language_cache.insert(article.feed_url.clone(), lang.clone());
+                                if let Some(ref feed_url) = article.feed_url {
+                                    feed_language_cache.insert(feed_url.clone(), lang.clone());
+                                }
                                 Some(lang)
                             }
                             Err(e) => {
