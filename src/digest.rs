@@ -6,7 +6,7 @@ use tokio::time::sleep;
 
 use crate::config::AppConfig;
 use crate::email::EmailClient;
-use crate::freshrss_native::NativeFreshRSSClient;
+use crate::freshrss_fever::FeverClient;
 use crate::llm::LlmClient;
 use crate::qdrant::QdrantClientWrapper;
 
@@ -84,7 +84,7 @@ fn combine_rag_context(semantic: &[serde_json::Value], recent: &[serde_json::Val
 
 pub async fn generate_and_send_digest(
     config: Arc<AppConfig>,
-    freshrss_client: Arc<NativeFreshRSSClient>,
+    freshrss_client: Arc<FeverClient>,
     qdrant_client: Arc<QdrantClientWrapper>,
     llm_client: Arc<LlmClient>,
     email_client: Arc<EmailClient>,
@@ -204,7 +204,7 @@ pub async fn generate_and_send_digest(
                                 log::info!(
                                     "Detected language {} for feed '{}' (cached for future articles)",
                                     lang,
-                                    article.feed_title.as_deref().unwrap_or("Unknown Feed")
+                                    article.feed_title
                                 );
                                 if let Some(ref feed_url) = article.feed_url {
                                     feed_language_cache.insert(feed_url.clone(), lang.clone());

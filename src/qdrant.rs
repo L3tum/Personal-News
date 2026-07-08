@@ -8,13 +8,13 @@ use qdrant_client::{Payload, Qdrant};
 use serde::{Deserialize, Serialize};
 
 use crate::config::QdrantConfig;
-use crate::freshrss_native::Article;
+use crate::freshrss_fever::Article;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ArticlePayload {
     pub title: String,
     pub url: String,
-    pub feed_title: Option<String>,
+    pub feed_title: String,
     pub feed_url: Option<String>,
     pub author: Option<String>,
     pub content: String,

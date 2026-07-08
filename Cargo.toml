@@ -39,5 +39,8 @@ urlencoding = "2.1"
 # CLI
 clap = { version = "4", features = ["derive"] }
 
+# MD5 for Fever API authentication
+md5 = "0.7"
+
 [dev-dependencies]
 tempfile = "3"
