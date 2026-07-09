@@ -104,15 +104,37 @@ impl FeverClient {
         let api_key = self.api_key(username, password_to_use);
 
         // First, verify authentication works
-        let auth_response: FeverAuthResponse = self
+        let auth_resp = self
             .client
             .post(format!("{}?api", url))
             .form(&[("api_key", &api_key)])
             .send()
-            .await?
-            .json()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to parse Fever auth response: {}", e))?;
+            .await?;
+        let auth_status = auth_resp.status();
+        let auth_content_type: String = auth_resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|ct| ct.to_str().ok())
+            .unwrap_or("unknown")
+            .to_string();
+        let auth_body = auth_resp.text().await?;
+        let auth_response: FeverAuthResponse = serde_json::from_str(&auth_body).map_err(|e| {
+            log::error!(
+                "Fever API auth returned non-JSON response:
+Status: {}
+Content-Type: {}
+Body:
+{}",
+                auth_status,
+                auth_content_type,
+                auth_body
+            );
+            anyhow::anyhow!(
+                "Failed to parse Fever auth response: {}\nServer returned: {}",
+                e,
+                auth_body
+            )
+        })?;
 
         if auth_response.auth != 1 {
             return Err(anyhow::anyhow!(
@@ -122,15 +144,38 @@ impl FeverClient {
         }
 
         // Fetch unread items with full details
-        let items_response: FeverItemsResponse = self
+        let resp = self
             .client
             .post(format!("{}?api&unread_item_ids", url))
             .form(&[("api_key", &api_key)])
             .send()
-            .await?
-            .json()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to parse Fever items response: {}", e))?;
+            .await?;
+        let status = resp.status();
+        let content_type: String = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|ct| ct.to_str().ok())
+            .unwrap_or("unknown")
+            .to_string();
+        let items_body = resp.text().await?;
+        let items_response: FeverItemsResponse =
+            serde_json::from_str(&items_body).map_err(|e| {
+                log::error!(
+                    "Fever API unread_item_ids returned non-JSON response:
+Status: {}
+Content-Type: {}
+Body:
+{}",
+                    status,
+                    content_type,
+                    items_body
+                );
+                anyhow::anyhow!(
+                    "Failed to parse Fever items response: {}\nServer returned: {}",
+                    e,
+                    items_body
+                )
+            })?;
 
         let mut article_vec = Vec::new();
         for item in items_response.items {
