@@ -12,9 +12,6 @@ tokio = { version = "1", features = ["full"] }
 # HTTP client (no native TLS)
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
 
-# RSS parsing
-rss = "2.1"
-
 # Vector database (Qdrant) — disable default features, reqwest uses rustls via our direct dep
 qdrant-client = { version = "1.18.0", default-features = false, features = ["reqwest", "serde"] }
 
@@ -25,7 +22,6 @@ pulldown-cmark = "0.10"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.9"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
@@ -34,13 +30,9 @@ log = "0.4"
 env_logger = "0.11"
 anyhow = "1"
 dotenvy = "0.15"
-urlencoding = "2.1"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
 
 # MD5 for Fever API authentication
 md5 = "0.7"
-
-[dev-dependencies]
-tempfile = "3"

@@ -105,9 +105,9 @@ pub async fn generate_and_send_digest(
         log::info!("Processing user: {}", user_config.name);
 
         // Fetch unread articles for this user with retry-backoff
-        // Use per-user credentials (fallback to global admin if no user password is provided)
+        // Use per-user FreshRSS API password (fallback to global if not provided)
         let user_freshrss_username = user_config.freshrss_username.clone();
-        let user_freshrss_password = user_config.freshrss_password.clone();
+        let user_freshrss_password = user_config.freshrss_api_password.clone();
         let freshrss_client_clone = Arc::clone(&freshrss_client);
         let since_val = since;
         let articles = match retry_with_backoff(3, move || {
@@ -180,8 +180,8 @@ pub async fn generate_and_send_digest(
             // Detect language and optionally translate for this user
             // Prefer FreshRSS's feed-level language, with per-feed detection cache as fallback
             let translated_summary = if let Some(ref target_lang) = user_config.target_language {
-                // First, try FreshRSS's own language field (if the feed has one)
-                // Fall back to per-feed detection cache, then to live detection
+                // First, try FreshRSS's own language field (always None for the Fever API);
+                // fall back to per-feed detection cache, then to live detection
                 let detected = match (
                     article.language.as_ref(),
                     article
@@ -309,7 +309,7 @@ pub async fn generate_and_send_digest(
         // Mark articles as read in FreshRSS with retry
         let ids: Vec<u64> = articles.iter().map(|a| a.id).collect();
         let user_freshrss_username = user_config.freshrss_username.clone();
-        let user_freshrss_password = user_config.freshrss_password.clone();
+        let user_freshrss_password = user_config.freshrss_api_password.clone();
         let freshrss_client_clone = Arc::clone(&freshrss_client);
         if let Err(e) = retry_with_backoff(3, move || {
             let client = Arc::clone(&freshrss_client_clone);

@@ -1,8 +1,6 @@
 mod config;
 mod digest;
 mod email;
-#[allow(dead_code)] // legacy greader API, kept for reference
-mod freshrss;
 mod freshrss_fever; // Fever API client
 mod llm;
 mod qdrant;

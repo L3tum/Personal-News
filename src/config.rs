@@ -14,10 +14,11 @@ pub struct AppConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct FreshRSSConfig {
     pub url: String,
-    #[allow(dead_code)]
-    // Used as fallback credentials when a user doesn't provide their own password
-    pub username: String,
-    pub password: String,
+    /// Global fallback **API password**. The FreshRSS Fever API authenticates
+    /// with a *separate* per-user API password (not the web login password),
+    /// set in the FreshRSS UI under Settings → Profile → "API password".
+    /// Used whenever a digest user does not define `freshrss_api_password`.
+    pub api_password: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -60,7 +61,12 @@ pub struct SmtpConfig {
 pub struct UserConfig {
     pub name: String,
     pub freshrss_username: String,
-    pub freshrss_password: Option<String>,
+    /// This user's FreshRSS **API password** (set per user in the FreshRSS
+    /// web UI, Settings → Profile → "API password"). The Fever API requires
+    /// this separate password — it is NOT the web login password.
+    /// If omitted (null), the global `FRESHRSS_API_PASSWORD` is used.
+    #[serde(alias = "freshrss_password")]
+    pub freshrss_api_password: Option<String>,
     pub email: String,
     /// Optional target language for translated summaries (ISO 639-1, e.g., "en", "de", "fr").
     /// If set, summaries will be translated to this language. If None, no translation.
@@ -91,8 +97,22 @@ impl AppConfig {
         Ok(AppConfig {
             freshrss: FreshRSSConfig {
                 url: required_env!("FRESHRSS_URL")?,
-                username: required_env!("FRESHRSS_USERNAME")?,
-                password: required_env!("FRESHRSS_PASSWORD")?,
+                api_password: std::env::var("FRESHRSS_API_PASSWORD")
+                    .or_else(|_| {
+                        std::env::var("FRESHRSS_PASSWORD").inspect(|_| {
+                            log::warn!(
+                                "FRESHRSS_PASSWORD is deprecated, use FRESHRSS_API_PASSWORD \
+                             (the per-user API password from the FreshRSS web UI)"
+                            );
+                        })
+                    })
+                    .map_err(|_| {
+                        anyhow::anyhow!(
+                            "Environment variable FRESHRSS_API_PASSWORD is not set. \
+                         This is the FreshRSS *API password* (not the web login password): \
+                         FreshRSS web UI → Settings → Profile → 'API password'."
+                        )
+                    })?,
             },
             qdrant: QdrantConfig {
                 url: required_env!("QDRANT_URL")?,
@@ -151,7 +171,7 @@ impl AppConfig {
                             vec![UserConfig {
                                 name: "Default".to_string(),
                                 freshrss_username: "admin".to_string(),
-                                freshrss_password: None, // will use global admin credentials
+                                freshrss_api_password: None, // will use the global API password
                                 email: std::env::var("DEFAULT_EMAIL")
                                     .map_err(|_| {
                                         anyhow::anyhow!(
@@ -169,7 +189,7 @@ impl AppConfig {
                     vec![UserConfig {
                         name: "Default".to_string(),
                         freshrss_username: "admin".to_string(),
-                        freshrss_password: None, // will use global admin credentials
+                        freshrss_api_password: None, // will use the global API password
                         email: std::env::var("DEFAULT_EMAIL")
                             .map_err(|_| {
                                 anyhow::anyhow!(

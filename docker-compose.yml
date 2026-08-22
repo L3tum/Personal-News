@@ -14,10 +14,12 @@ services:
     container_name: rss_digest
     restart: unless-stopped
     environment:
-      # FreshRSS
+      # FreshRSS (Fever API)
+      # FRESHRSS_API_PASSWORD is the FreshRSS *API password* (not the login
+      # password): FreshRSS web UI → Settings → Profile → "API password".
+      # The admin must enable "Allow API access" (system settings → Authentication).
       FRESHRSS_URL: http://freshrss:8080
-      FRESHRSS_USERNAME: admin
-      FRESHRSS_PASSWORD: your_password
+      FRESHRSS_API_PASSWORD: your_api_password
       # Qdrant
       QDRANT_URL: http://qdrant:6334
       QDRANT_API_KEY: ""
@@ -43,8 +45,9 @@ services:
       # Override if needed:
       # CRON_TIME: "06:00"
       # CRON_TIMEZONE: UTC
-      # Users (JSON array — see .env.example for full example)
-      # USERS: '[{"name":"You","freshrss_user":"admin","email":"you@example.com","shared_feeds":[]}]'
+      # Users (JSON array — see .env.example for full example).
+      # Each user needs their own FreshRSS account and API password.
+      # USERS: '[{"name":"You","freshrss_username":"you","freshrss_api_password":"pw","email":"you@example.com"}]'
     depends_on:
       - freshrss
       - qdrant
