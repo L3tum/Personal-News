@@ -10,7 +10,7 @@ license = "MIT"
 tokio = { version = "1", features = ["full"] }
 
 # HTTP client (no native TLS)
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+reqwest = { version = "0.13", features = ["json", "stream", "rustls-tls"], default-features = false }
 
 # Vector database (Qdrant) — disable default features, reqwest uses rustls via our direct dep
 qdrant-client = { version = "1.18.0", default-features = false, features = ["reqwest", "serde"] }
