@@ -56,7 +56,7 @@ services:
 
   # FreshRSS — web-based RSS reader
   freshrss:
-    image: freshrss/freshrss:latest
+    image: freshrss/freshrss:latest@sha256:48b63b9bc3d042a1301c32971b01af8841c7f059b452589c5bf77f475ba44c61
     container_name: freshrss
     restart: unless-stopped
     ports:
@@ -75,7 +75,7 @@ services:
 
   # Qdrant — vector database for RAG context
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:latest@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
     container_name: qdrant
     restart: unless-stopped
     ports:
@@ -89,7 +89,7 @@ services:
 
   # LibreTranslate — self-hosted translation service
   libretranslate:
-    image: libretranslate/libretranslate:latest
+    image: libretranslate/libretranslate:latest@sha256:3c1b5409c99ba7c1c361564564418c00890d83bb2f38e4dac3a7736cfda00d02
     container_name: libretranslate
     restart: unless-stopped
     ports:
@@ -99,7 +99,7 @@ services:
 
   # Ollama — LLM inference (uncomment to run locally)
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:latest@sha256:5d3a2f25f9825628daba94dc0b1d421c7d57d6c03ae5faa9ba050e058bab8241
     container_name: ollama
     restart: unless-stopped
     ports:
