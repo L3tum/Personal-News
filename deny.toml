@@ -17,6 +17,6 @@ allow = [
 ]
 
 [advisories]
-ignore = ["RUSTSEC-2025-0134"]  # rustls-pemfile unmaintained, no upgrade path in qdrant-client/tonic
+ignore = []
 
 [bans]
