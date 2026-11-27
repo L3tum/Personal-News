@@ -1,7 +1,7 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
 
 # Build with musl for a fully static binary (no dynamic libc dependencies)
-FROM rust:1.96 AS builder
+FROM rust:1.96@sha256:1f0dbad1df66647807e6952d1db85d0b2bda7606cb2139d82517e4f009967376 AS builder
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 

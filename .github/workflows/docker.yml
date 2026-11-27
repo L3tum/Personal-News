@@ -27,7 +27,7 @@ jobs:
   build-forgejo:
     needs: [should-push]
     if: github.server_url != 'https://github.com'
-    uses: l3tum/reusable-workflows/.github/workflows/publish-forgejo.yml@main
+    uses: l3tum/reusable-workflows/.github/workflows/publish-forgejo.yml@8b730606a67c0392e8952fa9122e82cc4f90c724 # main
     with:
       PUSH: ${{ needs.should-push.outputs.should_push }}
     secrets:
@@ -35,6 +35,6 @@ jobs:
   build-gchr:
     needs: [should-push]
     if: github.server_url == 'https://github.com'
-    uses: l3tum/reusable-workflows/.github/workflows/publish-gchr.yml@main
+    uses: l3tum/reusable-workflows/.github/workflows/publish-gchr.yml@8b730606a67c0392e8952fa9122e82cc4f90c724 # main
     with:
       PUSH: ${{ needs.should-push.outputs.should_push }}
